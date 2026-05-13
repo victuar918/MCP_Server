@@ -108,13 +108,28 @@ app.post('/message', async (req, res) => {
   }
 });
 
+// server.js 의 /auth 라우터 부분을 아래처럼 교체하시면 에러 원인을 화면에 띄워줍니다.
+
 app.get('/auth', (req, res) => {
-  const authorizeUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/script.projects'],
-  });
-  res.redirect(authorizeUrl);
+  // 환경변수 누락 체크 로직 추가
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(500).send(`
+      <h1>환경변수 누락 에러!</h1>
+      <p>Cloud Run 환경변수에 <b>GOOGLE_CLIENT_ID</b> 또는 <b>GOOGLE_CLIENT_SECRET</b>가 비어있습니다.</p>
+      <p>현재 인식된 ID: ${process.env.GOOGLE_CLIENT_ID ? '존재함' : '없음'}</p>
+    `);
+  }
+
+  try {
+    const authorizeUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/script.projects'],
+    });
+    res.redirect(authorizeUrl);
+  } catch (error) {
+    res.status(500).send('URL 생성 오류: ' + error.message);
+  }
 });
 
 app.get('/auth/callback', async (req, res) => {
