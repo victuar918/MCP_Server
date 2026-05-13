@@ -108,19 +108,30 @@ app.post('/message', async (req, res) => {
   }
 });
 
-// server.js 의 /auth 라우터 부분을 아래처럼 교체하시면 에러 원인을 화면에 띄워줍니다.
+// server.js 의 OAuth 관련 부분을 이렇게 수정합니다.
+// (기존 상단에 있던 const oauth2Client = new OAuth2Client(...) 부분은 삭제하세요!)
 
 app.get('/auth', (req, res) => {
-  // 환경변수 누락 체크 로직 추가
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `https://mcp-server-611151539232.asia-northeast3.run.app/auth/callback`;
+
+  // 환경변수가 텅 비어있는지 화면에서 바로 확인하기 위한 방어 코드
+  if (!clientId || !clientSecret) {
     return res.status(500).send(`
-      <h1>환경변수 누락 에러!</h1>
-      <p>Cloud Run 환경변수에 <b>GOOGLE_CLIENT_ID</b> 또는 <b>GOOGLE_CLIENT_SECRET</b>가 비어있습니다.</p>
-      <p>현재 인식된 ID: ${process.env.GOOGLE_CLIENT_ID ? '존재함' : '없음'}</p>
+      <div style="padding: 20px; font-family: sans-serif;">
+        <h2 style="color: red;">🚨 환경변수 누락 에러!</h2>
+        <p>Cloud Run에 환경변수가 전달되지 않았습니다. 수동 배포 시 변수가 초기화되었습니다.</p>
+        <ul>
+          <li><b>GOOGLE_CLIENT_ID:</b> ${clientId ? '존재함' : '비어있음 (undefined)'}</li>
+          <li><b>GOOGLE_CLIENT_SECRET:</b> ${clientSecret ? '존재함' : '비어있음 (undefined)'}</li>
+        </ul>
+      </div>
     `);
   }
 
   try {
+    const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
     const authorizeUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
@@ -133,14 +144,26 @@ app.get('/auth', (req, res) => {
 });
 
 app.get('/auth/callback', async (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `https://mcp-server-611151539232.asia-northeast3.run.app/auth/callback`;
+  
   const code = req.query.code;
   try {
+    const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
     const { tokens } = await oauth2Client.getToken(code);
-    res.send(`<h1>인증 성공!</h1><p>Refresh Token: ${tokens.refresh_token}</p>`);
+    res.send(`
+      <div style="padding: 20px; font-family: sans-serif;">
+        <h2 style="color: green;">✅ 인증 성공!</h2>
+        <p>아래 Refresh Token을 복사하여 <b>GOOGLE_REFRESH_TOKEN</b> 환경변수에 넣으세요.</p>
+        <textarea rows="5" cols="70" readonly>${tokens.refresh_token}</textarea>
+      </div>
+    `);
   } catch (error) {
     res.status(500).send('인증 오류: ' + error.message);
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`🔱 ASTERION MCP Server is running on port ${PORT}`);
