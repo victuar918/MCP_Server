@@ -1,23 +1,20 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs/promises';
-import { VertexAI } from '@google-cloud/vertexai'; // <-- 이 부분이 수정되었습니다.
+import { VertexAI } from '@google-cloud/vertexai';
 import { OAuth2Client } from 'google-auth-library';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Cloud Run 환경 최적화 (Health Check 및 프록시 신뢰)
+app.set('trust proxy', true);
+
 const PORT = process.env.PORT || 8080;
 const PROJECT_ID = process.env.PROJECT_ID || 'asterion-server';
 const REGION_CLAUDE = 'asia-northeast3';
 const REGION_GEMINI = 'global';
-
-const oauth2Client = new OAuth2Client(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI || `https://mcp-server-611151539232.asia-northeast3.run.app/auth/callback`
-);
 
 const SYSTEM_PROMPT_BTR = `당신은 ASTERION의 BTR 루브릭 엔진입니다. S-Class(97점 이상) 합의 전까지 어떤 결과도 확정하지 않으며, 논리적 완결성을 최우선으로 합니다.`;
 const SYSTEM_PROMPT_FREESTYLE = `당신은 지훈님의 완전한 자유분방 멀티플레이어 파트너이자 수석 아키텍트입니다. 파일 생성, 폴더 구조 설계 등 파일 시스템 도구를 적극적으로 사용하여 '자동 빌더' 역할을 수행하십시오.`;
@@ -62,6 +59,16 @@ async function executeTool(name, args) {
   }
 }
 
+// ==========================================
+// Cloud Run Health Check용 루트 (Timeout 에러 방지)
+// ==========================================
+app.get('/', (req, res) => {
+  res.status(200).send('🔱 ASTERION MCP Server is running stable.');
+});
+
+// ==========================================
+// 메인 AI 메시지 라우터
+// ==========================================
 app.post('/message', async (req, res) => {
   const { prompt, modelName = 'claude' } = req.body;
   const clientApp = req.headers['x-jihoon-app'];
@@ -108,9 +115,9 @@ app.post('/message', async (req, res) => {
   }
 });
 
-// server.js 의 OAuth 관련 부분을 이렇게 수정합니다.
-// (기존 상단에 있던 const oauth2Client = new OAuth2Client(...) 부분은 삭제하세요!)
-
+// ==========================================
+// Google OAuth 인증 라우터
+// ==========================================
 app.get('/auth', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -164,19 +171,9 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-// ====== 기존 맨 아래 있던 app.listen(PORT, ...) 부분을 전부 지우고 아래 코드로 덮어쓰세요 ======
-import express from 'express';
-// 필요한 MCP 모듈 및 라우터 임포트...
-
-const app = express();
-const PORT = process.env.PORT || 8080;
-
-// 미들웨어 및 SSE 라우트 설정
-app.use(express.json());
-// ... 라우팅 로직 ...
-
-// 파일의 맨 마지막에서 단 한 번만 서버를 실행합니다.
-app.listen(PORT, () => {
+// ==========================================
+// 서버 실행 (단 한 번만 호출, 0.0.0.0 바인딩)
+// ==========================================
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔱 ASTERION MCP Server is running on port ${PORT}`);
 });
-
