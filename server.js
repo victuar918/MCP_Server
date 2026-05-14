@@ -164,7 +164,22 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
+// ====== 기존 맨 아래 있던 app.listen(PORT, ...) 부분을 전부 지우고 아래 코드로 덮어쓰세요 ======
 
-app.listen(PORT, () => {
-  console.log(`🔱 ASTERION MCP Server is running on port ${PORT}`);
+// Cloud Run은 기본적으로 8080 포트를 주입하지만, 충돌을 막기 위해 안전장치 추가
+const serverPort = process.env.PORT || 8080;
+
+const server = app.listen(serverPort, () => {
+  console.log(`🔱 ASTERION MCP Server is running on port ${serverPort}`);
+});
+
+// 포트 충돌 에러 처리 (EADDRINUSE)
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`🚨 포트 ${serverPort}가 이미 사용 중입니다. 서버가 포트를 점유하지 못했습니다.`);
+    // Cloud Run 환경에서는 에러를 던지고 컨테이너를 죽이면 시스템이 알아서 새 컨테이너를 깔끔하게 다시 띄웁니다.
+    process.exit(1); 
+  } else {
+    console.error('🚨 서버 실행 중 알 수 없는 에러:', error);
+  }
 });
