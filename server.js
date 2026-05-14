@@ -4,11 +4,14 @@ import fs from 'fs/promises';
 import { VertexAI } from '@google-cloud/vertexai';
 import { OAuth2Client } from 'google-auth-library';
 
+// ==========================================
+// 1. 서버 초기화 및 환경 설정
+// ==========================================
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cloud Run 환경 최적화 (Health Check 및 프록시 신뢰)
+// Cloud Run 환경 최적화 (Health Check 통과 및 프록시 신뢰)
 app.set('trust proxy', true);
 
 const PORT = process.env.PORT || 8080;
@@ -16,6 +19,9 @@ const PROJECT_ID = process.env.PROJECT_ID || 'asterion-server';
 const REGION_CLAUDE = 'asia-northeast3';
 const REGION_GEMINI = 'global';
 
+// ==========================================
+// 2. 프롬프트 및 도구(Tools) 정의
+// ==========================================
 const SYSTEM_PROMPT_BTR = `당신은 ASTERION의 BTR 루브릭 엔진입니다. S-Class(97점 이상) 합의 전까지 어떤 결과도 확정하지 않으며, 논리적 완결성을 최우선으로 합니다.`;
 const SYSTEM_PROMPT_FREESTYLE = `당신은 지훈님의 완전한 자유분방 멀티플레이어 파트너이자 수석 아키텍트입니다. 파일 생성, 폴더 구조 설계 등 파일 시스템 도구를 적극적으로 사용하여 '자동 빌더' 역할을 수행하십시오.`;
 
@@ -60,15 +66,15 @@ async function executeTool(name, args) {
 }
 
 // ==========================================
-// Cloud Run Health Check용 루트 (Timeout 에러 방지)
+// 3. 라우팅 (API 엔드포인트)
 // ==========================================
+
+// [필수] Cloud Run Timeout 방지용 Health Check
 app.get('/', (req, res) => {
-  res.status(200).send('🔱 ASTERION MCP Server is running stable.');
+  res.status(200).send('🔱 ASTERION MCP Server is running perfectly.');
 });
 
-// ==========================================
-// 메인 AI 메시지 라우터
-// ==========================================
+// 메인 AI 메시지 처리 라우터
 app.post('/message', async (req, res) => {
   const { prompt, modelName = 'claude' } = req.body;
   const clientApp = req.headers['x-jihoon-app'];
@@ -115,20 +121,17 @@ app.post('/message', async (req, res) => {
   }
 });
 
-// ==========================================
-// Google OAuth 인증 라우터
-// ==========================================
+// Google OAuth 인증 요청
 app.get('/auth', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI || `https://mcp-server-611151539232.asia-northeast3.run.app/auth/callback`;
 
-  // 환경변수가 텅 비어있는지 화면에서 바로 확인하기 위한 방어 코드
   if (!clientId || !clientSecret) {
     return res.status(500).send(`
       <div style="padding: 20px; font-family: sans-serif;">
         <h2 style="color: red;">🚨 환경변수 누락 에러!</h2>
-        <p>Cloud Run에 환경변수가 전달되지 않았습니다. 수동 배포 시 변수가 초기화되었습니다.</p>
+        <p>Cloud Run에 환경변수가 전달되지 않았습니다.</p>
         <ul>
           <li><b>GOOGLE_CLIENT_ID:</b> ${clientId ? '존재함' : '비어있음 (undefined)'}</li>
           <li><b>GOOGLE_CLIENT_SECRET:</b> ${clientSecret ? '존재함' : '비어있음 (undefined)'}</li>
@@ -150,6 +153,7 @@ app.get('/auth', (req, res) => {
   }
 });
 
+// Google OAuth 콜백 처리
 app.get('/auth/callback', async (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -172,7 +176,7 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ==========================================
-// 서버 실행 (단 한 번만 호출, 0.0.0.0 바인딩)
+// 4. 서버 실행 (단 한 번만 호출됨)
 // ==========================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔱 ASTERION MCP Server is running on port ${PORT}`);
