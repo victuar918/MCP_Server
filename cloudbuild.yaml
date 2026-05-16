@@ -13,7 +13,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'mcp-server-611151539232' # Cloud Run 서비스 이름
+      - 'mcp-server' # Cloud Run 서비스 이름
       - '--image'
       - 'gcr.io/$PROJECT_ID/mcp-server:$COMMIT_SHA'
       - '--region'
