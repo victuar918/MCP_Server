@@ -19,8 +19,6 @@ steps:
       - '--region'
       - 'asia-northeast3'
       - '--allow-unauthenticated'
-      - '--set-env-vars'
-      - 'OPENAI_API_KEY=$_OPENAI_API_KEY' # 트리거 변수를 Cloud Run 환경변수로 주입
 
 options:
   logging: CLOUD_LOGGING_ONLY
