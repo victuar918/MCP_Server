@@ -19,6 +19,5 @@ steps:
       - '--region'
       - 'asia-northeast3'
       - '--allow-unauthenticated'
-      - '--keep-env-vars' # ★ 핵심: 기존 환경변수를 날리지 말고 유지해라!
 options:
   logging: CLOUD_LOGGING_ONLY
