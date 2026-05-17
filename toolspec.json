@@ -1,0 +1,19 @@
+{
+  "tools": [
+    { "name": "geocode_location",        "description": "출생지 텍스트를 위도/경도로 변환합니다." },
+    { "name": "get_timezone",            "description": "위도/경도+날짜로 DST 포함 타임존을 반환합니다." },
+    { "name": "get_planet_positions",    "description": "모든 행성의 라그나(D1) 라시·도수·역행 여부 계산. Lahiri 아야남샤." },
+    { "name": "get_house_positions",     "description": "12하우스 커스프 위치와 라시 계산." },
+    { "name": "get_navamsa_chart",       "description": "D9(나밤샤) 차트 계산. BTR D-9 정렬 검증 필수." },
+    { "name": "get_ascendant",           "description": "라그나(상승점) 라시와 도수 반환." },
+    { "name": "get_planet_in_house",     "description": "특정 행성이 위치한 하우스 번호 반환." },
+    { "name": "get_planet_in_sign",      "description": "특정 행성이 위치한 라시(12궁) 반환." },
+    { "name": "get_current_dasha",       "description": "현재(또는 특정 날짜) 비심다샤 기간 반환." },
+    { "name": "get_dasha_timeline",      "description": "전체 비심다샤 타임라인. BTR 사건 부합성 검증 핵심." },
+    { "name": "get_dasha_sandhi",        "description": "다샤 전환점(Sandhi) 날짜 목록. BTR Sandhi 15점 항목." },
+    { "name": "get_birth_nakshatra",     "description": "출생 달의 낙샤트라(27개 별자리) 반환." },
+    { "name": "get_planet_yogas",        "description": "차트 주요 요가(Raja/Dhana Yoga 등) 분석." },
+    { "name": "get_transit_planets",     "description": "특정 날짜의 행성 위치(트랜짓) 반환." },
+    { "name": "get_full_chart_analysis", "description": "전체 베딕 차트 계산 (행성/하우스/다샤/D9/요가). BTR 종합." }
+  ]
+}
