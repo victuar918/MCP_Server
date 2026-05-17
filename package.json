@@ -1,7 +1,7 @@
 {
   "name": "asterion-mcp",
   "version": "2.0.0",
-  "description": "ASTERION MCP Server — VedAstro L0 + L1~L3 확장 구조 | SSE + Streamable HTTP 이중 transport",
+  "description": "ASTERION MCP Server — VedAstro L0 도구 + L1~L3 확장 구조 | SSE + Streamable HTTP 이중 transport",
   "main": "index.js",
   "type": "module",
   "scripts": {
