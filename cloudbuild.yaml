@@ -1,11 +1,11 @@
 steps:
   # 1. Docker 이미지 빌드
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/mpc-server:$COMMIT_SHA', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/mcp-server:$COMMIT_SHA', '.']
   
   # 2. Docker 이미지 푸시
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/mpc-server:$COMMIT_SHA']
+    args: ['push', 'gcr.io/$PROJECT_ID/mcp-server:$COMMIT_SHA']
   
   # 3. Cloud Run 자동 배포 (기존 환경변수 유지!)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -13,9 +13,9 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'mpc-server' # Cloud Run 서비스 이름
+      - 'mcp-server' # Cloud Run 서비스 이름
       - '--image'
-      - 'gcr.io/$PROJECT_ID/mpc-server:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/mcp-server:$COMMIT_SHA'
       - '--region'
       - 'asia-northeast3'
       - '--allow-unauthenticated'
