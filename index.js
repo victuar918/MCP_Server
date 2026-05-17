@@ -1,5 +1,5 @@
 /**
- * asterion-mcp v2.3 — 완전 독립형 (MCP SDK 불필요)
+ * ASTERION AI Evolution Engine v2.3 — 완전 독립형 (MCP SDK 불필요)
  * SSE + Streamable HTTP 모두 직접 구현
  */
 
@@ -115,7 +115,7 @@ app.post('/message', requireMcpAuth, async (req, res) => {
   try {
     let result;
     if (method === 'initialize') {
-      result = { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'asterion-mcp', version: '2.3.0' } };
+      result = { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'ASTERION AI Evolution Engine', version: '2.3.0' } };
     } else if (method === 'notifications/initialized') {
       res.status(200).end(); return;
     } else if (method === 'tools/list') {
@@ -151,7 +151,7 @@ app.post('/', requireMcpAuth, async (req, res) => {
 
   try {
     if (method === 'initialize')
-      return ok({ protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'asterion-mcp', version: '2.3.0' } });
+      return ok({ protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'ASTERION AI Evolution Engine', version: '2.3.0' } });
     if (method === 'notifications/initialized')
       return res.status(200).json({ jsonrpc: '2.0' });
     if (method === 'tools/list')
@@ -172,11 +172,11 @@ app.post('/', requireMcpAuth, async (req, res) => {
 
 // ── 헬스체크 ────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.json({
-  status: 'running', server: 'asterion-mcp v2.3',
+  status: 'running', server: 'ASTERION AI Evolution Engine v2.3',
   transport: { sse: 'GET /sse + POST /message', streamableHttp: 'POST /' },
   tools: ALL_TOOLS.length, toolList: ALL_TOOLS.map(t => t.name),
 }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🔱 asterion-mcp v2.3 | port: ${PORT} | tools: ${ALL_TOOLS.length}`);
+  console.log(`🔱 ASTERION AI Evolution Engine v2.3 | port: ${PORT} | tools: ${ALL_TOOLS.length}`);
 });
