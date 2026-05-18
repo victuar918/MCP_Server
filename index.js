@@ -1,7 +1,7 @@
 /**
- * ASTERION AI Evolution Engine v5.4
- * fix: agent_registry_register — content 필드 사용 (Discovery API 스키마 확인)
- * McpServerSpec: {type:'TOOL_SPEC', content:{tools:[{name,description}]}}
+ * ASTERION AI Evolution Engine v5.5
+ * fix: agent_registry_register — inputSchema:{type:'object'} 추가 (필수 필드)
+ * McpServerSpec: {type:'TOOL_SPEC', content:{tools:[{name,description,inputSchema}]}}
  */
 
 import express from 'express';
@@ -100,7 +100,7 @@ const ALL_TOOLS = [
   {name:'artifact_list',description:'Artifact Registry 이미지 목록.',inputSchema:{type:'object',properties:{repository:{type:'string'},project:{type:'string'},location:{type:'string'}},required:[]}},
   {name:'cloudrun_set_env',description:'Cloud Run 환경변수 설정.',inputSchema:{type:'object',properties:{service:{type:'string'},envVars:{type:'object'},project:{type:'string'},region:{type:'string'}},required:['service','envVars']}},
   {name:'agent_registry_list',description:'★ Agent Registry 서비스 목록 직접 조회.',inputSchema:{type:'object',properties:{location:{type:'string'},project:{type:'string'}},required:[]}},
-  {name:'agent_registry_register',description:'★ Agent Registry에 MCP 서버 직접 등록. TOOL_SPEC content 필드로 74개 도구 포함. 기존 서비스 삭제 후 재등록.',inputSchema:{type:'object',properties:{display_name:{type:'string'},endpoint_url:{type:'string'},location:{type:'string'},service_id:{type:'string'},project:{type:'string'}},required:[]}},
+  {name:'agent_registry_register',description:'★ Agent Registry에 MCP 서버 직접 등록. TOOL_SPEC content+inputSchema로 74개 도구 포함.',inputSchema:{type:'object',properties:{display_name:{type:'string'},endpoint_url:{type:'string'},location:{type:'string'},service_id:{type:'string'},project:{type:'string'}},required:[]}},
   {name:'github_read_file',description:'GitHub 파일 읽기.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo','path']}},
   {name:'github_write_file',description:'★ GitHub 파일 쓰기 → 자동배포.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},content:{type:'string'},message:{type:'string'},branch:{type:'string'}},required:['repo','path','content','message']}},
   {name:'github_list_files',description:'GitHub 파일 목록.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo']}},
@@ -203,23 +203,20 @@ async function execGCloud(n,a){
     return res;
   }
 
-  // ★ Agent Registry 직접 등록 v5.4
-  // Discovery API 스키마 확인:
-  //   McpServerSpec.type = TOOL_SPEC
-  //   McpServerSpec.content = {tools:[{name,description}]}  ← toolSpec 아님!
-  //   Tool 스키마: {name, description} (inputSchema 없음, 10KB 제한)
+  // ★ Agent Registry 직접 등록 v5.5
+  // McpServerSpec.content.tools 각 항목에 inputSchema 필수
+  // 10KB 제한으로 {type:'object'} 최소 형식 사용
   if(n==='agent_registry_register'){
     const loc=a.location||GCP_REGION;
     const endpointUrl=a.endpoint_url||`${MCP_URL}/mcp`;
     const displayName=a.display_name||'ASTERION AI Evolution Engine';
     const serviceId=a.service_id||'asterion-mcp';
-    // 기존 서비스 삭제
     const delR=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services/${serviceId}`,{method:'DELETE',headers:{Authorization:`Bearer ${tok}`}});
     console.log(`[AgentRegistry] 기존 삭제: ${delR.status}`);
-    // content 필드에 {tools:[{name,description}]} 형식
-    const toolContent={tools:ALL_TOOLS.map(t=>({name:t.name,description:t.description}))};
+    // inputSchema 필수, 10KB 제한으로 {type:'object'} 최소 형식
+    const toolContent={tools:ALL_TOOLS.map(t=>({name:t.name,description:t.description,inputSchema:{type:'object'}}))};
     const body={displayName,interfaces:[{url:endpointUrl,protocolBinding:'JSONRPC'}],mcpServerSpec:{type:'TOOL_SPEC',content:toolContent}};
-    console.log(`[AgentRegistry] POST ${loc}/services?serviceId=${serviceId} — TOOL_SPEC content (${ALL_TOOLS.length}도구)`);
+    console.log(`[AgentRegistry] POST ${loc}/services?serviceId=${serviceId} — TOOL_SPEC (${ALL_TOOLS.length}도구, inputSchema:{type:'object'})`);
     const r=await fetch(
       `https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services?serviceId=${serviceId}`,
       {method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify(body)}
@@ -315,7 +312,7 @@ app.post('/message',requireMcpAuth,async(req,res)=>{
   const sseRes=sessions.get(req.query.sessionId);if(!sseRes)return res.status(404).json({error:'세션 없음'});
   const{id,method,params}=req.body||{},send=d=>sseRes.write(`data: ${JSON.stringify(d)}\n\n`);
   try{
-    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.4.0'}}});
+    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}}});
     else if(method==='tools/list')send({jsonrpc:'2.0',id,result:{tools:toolList}});
     else if(method==='tools/call'){const r=await executeTool(params?.name,params?.arguments||{});send({jsonrpc:'2.0',id,result:{content:[{type:'text',text:JSON.stringify(r,null,2)}]}});}
     else if(method==='ping')send({jsonrpc:'2.0',id,result:{}});
@@ -330,9 +327,9 @@ app.all('/mcp',requireMcpAuth,async(req,res)=>{
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   console.log(`[MCP] ${req.method} ${method||'(no-method)'}`);
   try{
-    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.4.0'}});
+    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
     if(!body)return err(-32700,'Parse error');
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.4.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(params?.name||body?.params?.name,params?.arguments||body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -344,7 +341,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   const body=req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.4.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(body?.params?.name,body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -352,8 +349,8 @@ app.post('/',requireMcpAuth,async(req,res)=>{
     return err(-32601,`Not found: ${method}`);
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
-app.get('/',(_req,res)=>res.json({status:'running',server:'ASTERION AI Evolution Engine v5.4',transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)}));
+app.get('/',(_req,res)=>res.json({status:'running',server:'ASTERION AI Evolution Engine v5.5',transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)}));
 app.listen(PORT,'0.0.0.0',()=>{
-  console.log(`\n🔱 ASTERION AI Evolution Engine v5.4 | port:${PORT} | tools:${ALL_TOOLS.length}`);
-  console.log(`   v5.4: agent_registry_register content 필드 (toolSpec→content, Discovery API 스키마 확인)\n`);
+  console.log(`\n🔱 ASTERION AI Evolution Engine v5.5 | port:${PORT} | tools:${ALL_TOOLS.length}`);
+  console.log(`   v5.5: agent_registry_register — inputSchema:{type:'object'} 최소형식 추가 (필수 필드)\n`);
 });
