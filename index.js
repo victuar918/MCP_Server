@@ -1,7 +1,6 @@
 /**
- * ASTERION AI Evolution Engine v5.5
- * fix: agent_registry_register — inputSchema:{type:'object'} 추가 (필수 필드)
- * McpServerSpec: {type:'TOOL_SPEC', content:{tools:[{name,description,inputSchema}]}}
+ * ASTERION AI Evolution Engine v5.6
+ * fix: sheets_write, append_sheet_row — Gemini 400 오류 수정 (array items 필드 추가)
  */
 
 import express from 'express';
@@ -105,10 +104,12 @@ const ALL_TOOLS = [
   {name:'github_write_file',description:'★ GitHub 파일 쓰기 → 자동배포.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},content:{type:'string'},message:{type:'string'},branch:{type:'string'}},required:['repo','path','content','message']}},
   {name:'github_list_files',description:'GitHub 파일 목록.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo']}},
   {name:'sheets_read',description:'Google Sheets 읽기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'}},required:['spreadsheetId','range']}},
-  {name:'sheets_write',description:'Google Sheets 쓰기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array'}},required:['spreadsheetId','range','values']}},
+  // ★ v5.6 fix: Gemini 400 방지 — array 타입에 items 필드 필수
+  {name:'sheets_write',description:'Google Sheets 쓰기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'array',items:{type:'string'}}}},required:['spreadsheetId','range','values']}},
   {name:'http_request',description:'임의 HTTP 요청.',inputSchema:{type:'object',properties:{url:{type:'string'},method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE']},body:{type:'object'},headers:{type:'object'}},required:['url']}},
   {name:'get_system_status',description:'ASTERION 전체 시스템 상태.',inputSchema:{type:'object',properties:{},required:[]}},
-  {name:'append_sheet_row',description:'Google Sheets 행 추가.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array'}},required:['spreadsheetId','range','values']}},
+  // ★ v5.6 fix: Gemini 400 방지 — array 타입에 items 필드 필수
+  {name:'append_sheet_row',description:'Google Sheets 행 추가.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'string'}}},required:['spreadsheetId','range','values']}},
   {name:'read_google_doc',description:'Google Docs 텍스트 추출.',inputSchema:{type:'object',properties:{document_id:{type:'string'}},required:['document_id']}},
   {name:'create_google_doc',description:'Google Docs 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},content:{type:'string'},folder_id:{type:'string'}},required:['title']}},
   {name:'create_spreadsheet',description:'Google Sheets 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},sheet_name:{type:'string'},folder_id:{type:'string'}},required:['title']}},
@@ -193,7 +194,6 @@ async function execGCloud(n,a){
   if(n==='cloudrun_services'){const r=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Cloud Run ${r.status}`};const d=await r.json();return{services:(d.services||[]).map(s=>({name:s.name?.split('/').pop(),url:s.uri,revision:s.latestReadyRevision?.split('/').pop(),updated:s.updateTime}))};}
   if(n==='artifact_list'){const loc=a.location||GCP_REGION,url=a.repository?`https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${loc}/repositories/${a.repository}/dockerImages`:`https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${loc}/repositories`;const r=await fetch(url,{headers:{Authorization:`Bearer ${tok}`}});return r.ok?await r.json():{error:`Artifact ${r.status}`};}
   if(n==='cloudrun_set_env'){const{service,envVars}=a,gr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{headers:{Authorization:`Bearer ${tok}`}});if(!gr.ok)return{error:`Cloud Run GET ${gr.status}`};const svc=await gr.json(),em={};(svc.template?.containers?.[0]?.env||[]).forEach(e=>{em[e.name]=e.value;});Object.assign(em,envVars);const pr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({template:{containers:[{...svc.template?.containers?.[0],env:Object.entries(em).map(([k,v])=>({name:k,value:v}))}]}})}); if(!pr.ok)return{error:`Cloud Run PATCH ${pr.status}: ${await pr.text()}`};return{success:true,service,updatedVars:Object.keys(envVars)};}
-
   if(n==='agent_registry_list'){
     const loc=a.location||GCP_REGION,res={};
     const r1=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services`,{headers:{Authorization:`Bearer ${tok}`}});
@@ -202,39 +202,17 @@ async function execGCloud(n,a){
     if(loc!=='global'){const r2=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/global/services`,{headers:{Authorization:`Bearer ${tok}`}});const t2=await r2.text();res['global']={status:r2.status,ok:r2.ok,data:r2.ok?(()=>{try{return JSON.parse(t2);}catch{return t2;}})():t2};}
     return res;
   }
-
-  // ★ Agent Registry 직접 등록 v5.5
-  // McpServerSpec.content.tools 각 항목에 inputSchema 필수
-  // 10KB 제한으로 {type:'object'} 최소 형식 사용
   if(n==='agent_registry_register'){
-    const loc=a.location||GCP_REGION;
-    const endpointUrl=a.endpoint_url||`${MCP_URL}/mcp`;
-    const displayName=a.display_name||'ASTERION AI Evolution Engine';
-    const serviceId=a.service_id||'asterion-mcp';
+    const loc=a.location||GCP_REGION,endpointUrl=a.endpoint_url||`${MCP_URL}/mcp`,displayName=a.display_name||'ASTERION AI Evolution Engine',serviceId=a.service_id||'asterion-mcp';
     const delR=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services/${serviceId}`,{method:'DELETE',headers:{Authorization:`Bearer ${tok}`}});
     console.log(`[AgentRegistry] 기존 삭제: ${delR.status}`);
-    // inputSchema 필수, 10KB 제한으로 {type:'object'} 최소 형식
     const toolContent={tools:ALL_TOOLS.map(t=>({name:t.name,description:t.description,inputSchema:{type:'object'}}))};
     const body={displayName,interfaces:[{url:endpointUrl,protocolBinding:'JSONRPC'}],mcpServerSpec:{type:'TOOL_SPEC',content:toolContent}};
-    console.log(`[AgentRegistry] POST ${loc}/services?serviceId=${serviceId} — TOOL_SPEC (${ALL_TOOLS.length}도구, inputSchema:{type:'object'})`);
-    const r=await fetch(
-      `https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services?serviceId=${serviceId}`,
-      {method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify(body)}
-    );
-    const text=await r.text();
-    let parsed; try{parsed=JSON.parse(text);}catch{parsed=text;}
-    if(r.ok&&parsed.name){
-      let op=parsed;
-      for(let i=0;i<15&&!op.done;i++){
-        await new Promise(res=>setTimeout(res,2000));
-        const pr=await fetch(`https://agentregistry.googleapis.com/v1alpha/${op.name}`,{headers:{Authorization:`Bearer ${tok}`}});
-        if(pr.ok)op=await pr.json();
-      }
-      return{status:r.status,ok:r.ok,location:loc,endpoint:endpointUrl,serviceId,tools_count:ALL_TOOLS.length,operation_done:op.done,operation_error:op.error||null,result:op.response||op};
-    }
+    const r=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services?serviceId=${serviceId}`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const text=await r.text();let parsed;try{parsed=JSON.parse(text);}catch{parsed=text;}
+    if(r.ok&&parsed.name){let op=parsed;for(let i=0;i<15&&!op.done;i++){await new Promise(res=>setTimeout(res,2000));const pr=await fetch(`https://agentregistry.googleapis.com/v1alpha/${op.name}`,{headers:{Authorization:`Bearer ${tok}`}});if(pr.ok)op=await pr.json();}return{status:r.status,ok:r.ok,location:loc,endpoint:endpointUrl,serviceId,tools_count:ALL_TOOLS.length,operation_done:op.done,operation_error:op.error||null,result:op.response||op};}
     return{status:r.status,ok:r.ok,location:loc,endpoint:endpointUrl,serviceId,response:parsed};
   }
-
   return{error:`미구현: ${n}`};
 }
 
@@ -312,7 +290,7 @@ app.post('/message',requireMcpAuth,async(req,res)=>{
   const sseRes=sessions.get(req.query.sessionId);if(!sseRes)return res.status(404).json({error:'세션 없음'});
   const{id,method,params}=req.body||{},send=d=>sseRes.write(`data: ${JSON.stringify(d)}\n\n`);
   try{
-    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}}});
+    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}}});
     else if(method==='tools/list')send({jsonrpc:'2.0',id,result:{tools:toolList}});
     else if(method==='tools/call'){const r=await executeTool(params?.name,params?.arguments||{});send({jsonrpc:'2.0',id,result:{content:[{type:'text',text:JSON.stringify(r,null,2)}]}});}
     else if(method==='ping')send({jsonrpc:'2.0',id,result:{}});
@@ -325,11 +303,10 @@ app.all('/mcp',requireMcpAuth,async(req,res)=>{
   if(req.method==='DELETE')return res.status(200).json({jsonrpc:'2.0'});
   const body=req.method==='GET'?null:req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
-  console.log(`[MCP] ${req.method} ${method||'(no-method)'}`);
   try{
-    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
+    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
     if(!body)return err(-32700,'Parse error');
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(params?.name||body?.params?.name,params?.arguments||body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -341,7 +318,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   const body=req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.5.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(body?.params?.name,body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -349,8 +326,8 @@ app.post('/',requireMcpAuth,async(req,res)=>{
     return err(-32601,`Not found: ${method}`);
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
-app.get('/',(_req,res)=>res.json({status:'running',server:'ASTERION AI Evolution Engine v5.5',transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)}));
+app.get('/',(_req,res)=>res.json({status:'running',server:'ASTERION AI Evolution Engine v5.6',transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)}));
 app.listen(PORT,'0.0.0.0',()=>{
-  console.log(`\n🔱 ASTERION AI Evolution Engine v5.5 | port:${PORT} | tools:${ALL_TOOLS.length}`);
-  console.log(`   v5.5: agent_registry_register — inputSchema:{type:'object'} 최소형식 추가 (필수 필드)\n`);
+  console.log(`\n🔱 ASTERION AI Evolution Engine v5.6 | port:${PORT} | tools:${ALL_TOOLS.length}`);
+  console.log(`   v5.6: sheets_write/append_sheet_row Gemini 400 오류 수정 (array items 필드 추가)\n`);
 });
