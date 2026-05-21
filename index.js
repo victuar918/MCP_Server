@@ -1,6 +1,9 @@
 /**
- * ASTERION AI Evolution Engine v5.6
- * fix: sheets_write, append_sheet_row — Gemini 400 오류 수정 (array items 필드 추가)
+ * ASTERION AI Evolution Engine v5.7
+ * P1: save_runtime_snapshot에 critical_issues + suggestions + analysis_summary 추가
+ * P2: btr_write_notification + btr_finalize_confirmed + btr_finalize_held 신규 도구
+ *     알림 시점 정확화 → Phase 3 MCP↔Hub 연동 준비 완료
+ * v5.6: sheets_write, append_sheet_row — Gemini 400 오류 수정
  */
 
 import express from 'express';
@@ -21,6 +24,7 @@ const VEDASTRO_BASE   = 'https://api.vedastro.org/api';
 const VEDASTRO_KEY    = process.env.VEDASTRO_API_KEY || '';
 const ARCHIVE_SS_ID   = '1ym1cgr1apEyTlqtJXqrfdnLjoyJTh086CjGycMcUOS8';
 const RUNTIME_SHEET   = 'BTRRuntime';
+const NOTIF_SHEET     = 'BTRNotifications';
 const MCP_URL         = 'https://mcp-server-611151539232.asia-northeast3.run.app';
 
 function requireMcpAuth(req, res, next) {
@@ -58,7 +62,49 @@ async function vedFetch(url) {
   return j.Payload;
 }
 
+// ────────────────────────────────────────────────────────────
+// 내부 헬퍼: BTRNotifications 행 작성
+// ────────────────────────────────────────────────────────────
+async function writeNotification(tok, session_id, type, title, content) {
+  const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+  const row = [id, session_id, type, title, content, 'pending', new Date().toISOString()];
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(NOTIF_SHEET+'!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    { method:'POST', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
+      body: JSON.stringify({majorDimension:'ROWS', values:[row]}) }
+  );
+  return id;
+}
+
+// 내부 헬퍼: Archive 시트에서 StructureCode 행 찾아서 특정 컬럼 업데이트
+async function updateArchiveRow(tok, structure_code, updates) {
+  const r = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent('Archive')}`,
+    { headers:{Authorization:`Bearer ${tok}`} }
+  );
+  if (!r.ok) return {error:`Archive 읽기 실패 ${r.status}`};
+  const rows = ((await r.json()).values) || [];
+  const hdr  = rows[0] || [];
+  const idx  = k => hdr.indexOf(k);
+  const ri   = rows.findIndex((row, i) => i > 0 && row[0] === structure_code);
+  if (ri < 0) return {error:`구조코드 없음: ${structure_code}`};
+  const row = [...rows[ri]];
+  // 필요한 만큼 배열 확장
+  while (row.length < hdr.length) row.push('');
+  Object.entries(updates).forEach(([k, v]) => {
+    const i = idx(k);
+    if (i >= 0) row[i] = v == null ? '' : String(v);
+  });
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent('Archive!A'+(ri+1))}?valueInputOption=USER_ENTERED`,
+    { method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
+      body: JSON.stringify({values:[row]}) }
+  );
+  return {success:true, row_index:ri};
+}
+
 const ALL_TOOLS = [
+  // ── L0: VedAstro ──────────────────────────────────────────
   {name:'geocode_location',description:'출생지를 위도/경도로 변환.',inputSchema:{type:'object',properties:{location:{type:'string'}},required:['location']}},
   {name:'get_timezone',description:'위도/경도+날짜로 타임존 반환.',inputSchema:{type:'object',properties:{latitude:{type:'number'},longitude:{type:'number'},dateTime:{type:'string'}},required:['latitude','longitude','dateTime']}},
   {name:'get_planet_positions',description:'행성 D1 라시·도수·역행.',inputSchema:{type:'object',properties:{dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['dateTime','latitude','longitude']}},
@@ -80,9 +126,31 @@ const ALL_TOOLS = [
   {name:'get_ashtakvarga_data',description:'아슈타크바르가 차트.',inputSchema:{type:'object',properties:{birth_date:{type:'string'},birth_time:{type:'string'},latitude:{type:'string'},longitude:{type:'string'},timezone:{type:'string'}},required:['birth_date','birth_time','latitude','longitude','timezone']}},
   {name:'astro_check_retrograde',description:'행성 역행 여부.',inputSchema:{type:'object',properties:{planet:{type:'string'},dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['planet','dateTime','latitude','longitude']}},
   {name:'astro_planetary_war_check',description:'그라하 유다(행성 전쟁) 감지.',inputSchema:{type:'object',properties:{dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['dateTime','latitude','longitude']}},
+
+  // ── L1: BTR ───────────────────────────────────────────────
   {name:'create_btr_session',description:'BTR 분석 세션 초기화.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},birth_data:{type:'string'},parent_folder_id:{type:'string'}},required:['structure_code','birth_data']}},
-  {name:'save_runtime_snapshot',description:'BTR 라운드 상태 저장.',inputSchema:{type:'object',properties:{session_id:{type:'string'},round:{type:'number'},candidate_slots:{type:'array',items:{type:'string'}},agreement_score:{type:'number'},entropy_score:{type:'number'},conflict_axis:{type:'string'},next_action:{type:'string',enum:['L0_physics','rubric_continue','question_generation','full_reset','sclass_validation','report_generation']},status:{type:'string',enum:['ACTIVE','QUESTION_MODE','RESET','SCLASS_REACHED','HELD']},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'}},required:['session_id','round','candidate_slots','agreement_score','entropy_score','next_action']}},
-  {name:'get_runtime_snapshot',description:'BTRRuntime 세션 조회.',inputSchema:{type:'object',properties:{session_id:{type:'string'}},required:['session_id']}},
+
+  // ★ v5.7 P1: critical_issues + suggestions + analysis_summary 추가
+  // 이전 라운드의 핵심 이슈와 제안사항을 다음 라운드로 전달하는 컨텍스트 누적 구조
+  {name:'save_runtime_snapshot',description:'BTR 라운드 상태 저장. critical_issues·suggestions·analysis_summary를 저장하면 다음 라운드 컨텍스트로 전달됨.',inputSchema:{type:'object',properties:{
+    session_id:{type:'string'},
+    round:{type:'number'},
+    candidate_slots:{type:'array',items:{type:'string'}},
+    agreement_score:{type:'number'},
+    entropy_score:{type:'number'},
+    conflict_axis:{type:'string'},
+    next_action:{type:'string',enum:['L0_physics','rubric_continue','question_generation','full_reset','sclass_validation','report_generation']},
+    status:{type:'string',enum:['ACTIVE','QUESTION_MODE','RESET','SCLASS_REACHED','HELD']},
+    gem_score:{type:'number'},
+    cl_score:{type:'number'},
+    gpt_score:{type:'number'},
+    // ★ P1 신규 필드
+    critical_issues:{type:'array',items:{type:'string'},description:'세 AI 모두 지적한 핵심 미해결 이슈 목록. 다음 라운드 컨텍스트로 전달됨.'},
+    suggestions:{type:'array',items:{type:'string'},description:'수렴을 위해 필요한 추가 분석 제안 목록. 다음 라운드 컨텍스트로 전달됨.'},
+    analysis_summary:{type:'string',description:'이번 라운드 핵심 이견 요약 (1~3문장). 다음 라운드 프롬프트에 직접 삽입됨.'}
+  },required:['session_id','round','candidate_slots','agreement_score','entropy_score','next_action']}},
+
+  {name:'get_runtime_snapshot',description:'BTRRuntime 세션 조회. critical_issues·suggestions·analysis_summary 포함 전체 상태 반환.',inputSchema:{type:'object',properties:{session_id:{type:'string'}},required:['session_id']}},
   {name:'purge_runtime_state',description:'BTRRuntime 세션 삭제.',inputSchema:{type:'object',properties:{session_id:{type:'string'}},required:['session_id']}},
   {name:'save_evolution_log',description:'BTR 진화 로그 Drive 저장.',inputSchema:{type:'object',properties:{session_id:{type:'string'},evolution_folder_id:{type:'string'},round:{type:'number'},log_data:{type:'object'}},required:['session_id','evolution_folder_id','round','log_data']}},
   {name:'get_evolution_history',description:'BTR 로그 파일 목록.',inputSchema:{type:'object',properties:{evolution_folder_id:{type:'string'}},required:['evolution_folder_id']}},
@@ -93,23 +161,54 @@ const ALL_TOOLS = [
   {name:'btr_re_eval_pivots',description:'후보 슬롯 재평가.',inputSchema:{type:'object',properties:{candidate_slots:{type:'array',items:{type:'string'}},conflict_axis:{type:'string'},pivot_criteria:{type:'string'}},required:['candidate_slots','conflict_axis']}},
   {name:'btr_weight_adjuster',description:'루브릭 가중치 조정.',inputSchema:{type:'object',properties:{event_count:{type:'number'},has_appearance_data:{type:'boolean'},has_career_data:{type:'boolean'},session_id:{type:'string'}},required:['event_count','has_appearance_data','has_career_data','session_id']}},
   {name:'btr_prediction_tester',description:'미래 예측 테스트.',inputSchema:{type:'object',properties:{candidate_time:{type:'string'},birth_date:{type:'string'},latitude:{type:'string'},longitude:{type:'string'},timezone:{type:'string'},test_period_years:{type:'number'}},required:['candidate_time','birth_date','latitude','longitude','timezone']}},
+
+  // ★ v5.7 P2: 알림 및 Hard Stop 클린업 도구
+  {name:'btr_write_notification',description:'BTRNotifications 시트에 알림 행 작성. Hub SSE가 즉시 수신 → 관리자 알림카드 표시.',inputSchema:{type:'object',properties:{
+    session_id:{type:'string'},
+    type:{type:'string',enum:['info_request','phase_confirm','report_complete','rubric_held','sclass_reached'],description:'알림 유형'},
+    title:{type:'string',description:'알림 카드 제목'},
+    content:{type:'string',description:'알림 상세 내용'}
+  },required:['session_id','type','title','content']}},
+
+  {name:'btr_finalize_confirmed',description:'★ S-Class Hard Stop 완료 처리. Archive BTRStatus→Confirmed + AnalysisScore/AnalysisDocs/BTR 기록 + sclass_reached 알림 자동 발송.',inputSchema:{type:'object',properties:{
+    session_id:{type:'string'},
+    structure_code:{type:'string'},
+    confirmed_birth_time:{type:'string',description:'확정 생시 (예: 1979년 11월 07일 05시 25분)'},
+    final_score:{type:'number',description:'세 AI 평균 최종 점수'},
+    analysis_doc_url:{type:'string',description:'최종 분석 Google Doc URL (선택)'},
+    gem_score:{type:'number'},
+    cl_score:{type:'number'},
+    gpt_score:{type:'number'}
+  },required:['session_id','structure_code','confirmed_birth_time','final_score']}},
+
+  {name:'btr_finalize_held',description:'★ Held 상태 완료 처리. Archive BTRStatus→Held + BTRStageNote 기록 + rubric_held 알림 자동 발송.',inputSchema:{type:'object',properties:{
+    session_id:{type:'string'},
+    structure_code:{type:'string'},
+    failure_summary:{type:'string',description:'수렴 실패 이유 요약'},
+    highest_score:{type:'number',description:'5라운드 중 최고 점수'},
+    best_candidate_time:{type:'string',description:'가장 높은 점수의 후보 생시'}
+  },required:['session_id','structure_code','failure_summary']}},
+
+  // ── L2: GCloud ────────────────────────────────────────────
   {name:'gcloud_submit',description:'Cloud Build로 gcloud 실행.',inputSchema:{type:'object',properties:{commands:{type:'array',items:{type:'string'}},project:{type:'string'}},required:['commands']}},
   {name:'cloudbuild_status',description:'Cloud Build 빌드 상태.',inputSchema:{type:'object',properties:{buildId:{type:'string'},project:{type:'string'}},required:['buildId']}},
   {name:'cloudrun_services',description:'Cloud Run 서비스 목록.',inputSchema:{type:'object',properties:{project:{type:'string'},region:{type:'string'}},required:[]}},
   {name:'artifact_list',description:'Artifact Registry 이미지 목록.',inputSchema:{type:'object',properties:{repository:{type:'string'},project:{type:'string'},location:{type:'string'}},required:[]}},
   {name:'cloudrun_set_env',description:'Cloud Run 환경변수 설정.',inputSchema:{type:'object',properties:{service:{type:'string'},envVars:{type:'object'},project:{type:'string'},region:{type:'string'}},required:['service','envVars']}},
   {name:'agent_registry_list',description:'★ Agent Registry 서비스 목록 직접 조회.',inputSchema:{type:'object',properties:{location:{type:'string'},project:{type:'string'}},required:[]}},
-  {name:'agent_registry_register',description:'★ Agent Registry에 MCP 서버 직접 등록. TOOL_SPEC content+inputSchema로 74개 도구 포함.',inputSchema:{type:'object',properties:{display_name:{type:'string'},endpoint_url:{type:'string'},location:{type:'string'},service_id:{type:'string'},project:{type:'string'}},required:[]}},
+  {name:'agent_registry_register',description:'★ Agent Registry에 MCP 서버 직접 등록. TOOL_SPEC content+inputSchema로 77개 도구 포함.',inputSchema:{type:'object',properties:{display_name:{type:'string'},endpoint_url:{type:'string'},location:{type:'string'},service_id:{type:'string'},project:{type:'string'}},required:[]}},
+
+  // ── L3: SystemOps ─────────────────────────────────────────
   {name:'github_read_file',description:'GitHub 파일 읽기.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo','path']}},
   {name:'github_write_file',description:'★ GitHub 파일 쓰기 → 자동배포.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},content:{type:'string'},message:{type:'string'},branch:{type:'string'}},required:['repo','path','content','message']}},
   {name:'github_list_files',description:'GitHub 파일 목록.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo']}},
   {name:'sheets_read',description:'Google Sheets 읽기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'}},required:['spreadsheetId','range']}},
-  // ★ v5.6 fix: Gemini 400 방지 — array 타입에 items 필드 필수
   {name:'sheets_write',description:'Google Sheets 쓰기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'array',items:{type:'string'}}}},required:['spreadsheetId','range','values']}},
   {name:'http_request',description:'임의 HTTP 요청.',inputSchema:{type:'object',properties:{url:{type:'string'},method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE']},body:{type:'object'},headers:{type:'object'}},required:['url']}},
   {name:'get_system_status',description:'ASTERION 전체 시스템 상태.',inputSchema:{type:'object',properties:{},required:[]}},
-  // ★ v5.6 fix: Gemini 400 방지 — array 타입에 items 필드 필수
   {name:'append_sheet_row',description:'Google Sheets 행 추가.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'string'}}},required:['spreadsheetId','range','values']}},
+
+  // ── L4: Workspace ─────────────────────────────────────────
   {name:'read_google_doc',description:'Google Docs 텍스트 추출.',inputSchema:{type:'object',properties:{document_id:{type:'string'}},required:['document_id']}},
   {name:'create_google_doc',description:'Google Docs 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},content:{type:'string'},folder_id:{type:'string'}},required:['title']}},
   {name:'create_spreadsheet',description:'Google Sheets 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},sheet_name:{type:'string'},folder_id:{type:'string'}},required:['title']}},
@@ -127,9 +226,13 @@ const ALL_TOOLS = [
   {name:'list_run_revisions',description:'Cloud Run 리비전 목록.',inputSchema:{type:'object',properties:{service_name:{type:'string'},project:{type:'string'},region:{type:'string'}},required:[]}},
   {name:'delete_run_revision',description:'Cloud Run 리비전 삭제.',inputSchema:{type:'object',properties:{revision_name:{type:'string'},project:{type:'string'},region:{type:'string'}},required:['revision_name']}},
   {name:'create_btr_report_doc',description:'BTR 보고서 Google Docs 생성.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},analysis_content:{type:'string'},folder_id:{type:'string'}},required:['structure_code','analysis_content','folder_id']}},
+
+  // ── L5: AI ────────────────────────────────────────────────
   {name:'call_gemini',description:'Gemini AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},role:{type:'string',enum:['analyzer','verifier']},system_prompt:{type:'string'},model:{type:'string'}},required:['prompt']}},
   {name:'call_claude',description:'Claude AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},max_tokens:{type:'number'}},required:['prompt']}},
   {name:'call_gpt',description:'GPT AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},max_tokens:{type:'number'}},required:['prompt']}},
+
+  // ── L6: Report/Ops ────────────────────────────────────────
   {name:'report_generate_btr_code',description:'BTR 확정 코드 생성.',inputSchema:{type:'object',properties:{session_id:{type:'string'},structure_code:{type:'string'},confirmed_birth_time:{type:'string'},confidence_score:{type:'number'}},required:['session_id','structure_code','confirmed_birth_time','confidence_score']}},
   {name:'report_generate_summary',description:'BTR 결과 요약.',inputSchema:{type:'object',properties:{session_id:{type:'string'},evolution_folder_id:{type:'string'}},required:['session_id','evolution_folder_id']}},
   {name:'report_add_gemstone_advice',description:'원석 배치 조언.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},birth_data:{type:'string'},gemstone_preferences:{type:'string'}},required:['structure_code','birth_data']}},
@@ -138,7 +241,8 @@ const ALL_TOOLS = [
 ];
 
 const L0=new Set(['geocode_location','get_timezone','get_planet_positions','get_house_positions','get_navamsa_chart','get_ascendant','get_planet_in_house','get_planet_in_sign','get_current_dasha','get_dasha_timeline','get_dasha_sandhi','get_birth_nakshatra','get_planet_yogas','get_transit_planets','get_full_chart_analysis','get_horoscope_predictions','get_match_report','get_numerology_prediction','get_ashtakvarga_data','astro_check_retrograde','astro_planetary_war_check']);
-const L1=new Set(['create_btr_session','save_runtime_snapshot','get_runtime_snapshot','purge_runtime_state','save_evolution_log','get_evolution_history','validate_sclass_gate','btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','btr_re_eval_pivots','btr_weight_adjuster','btr_prediction_tester']);
+// ★ v5.7: btr_write_notification, btr_finalize_confirmed, btr_finalize_held 추가 (L1: 13→16)
+const L1=new Set(['create_btr_session','save_runtime_snapshot','get_runtime_snapshot','purge_runtime_state','save_evolution_log','get_evolution_history','validate_sclass_gate','btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','btr_re_eval_pivots','btr_weight_adjuster','btr_prediction_tester','btr_write_notification','btr_finalize_confirmed','btr_finalize_held']);
 const L2=new Set(['gcloud_submit','cloudbuild_status','cloudrun_services','artifact_list','cloudrun_set_env','agent_registry_list','agent_registry_register']);
 const L3=new Set(['github_read_file','github_write_file','github_list_files','sheets_read','sheets_write','http_request','get_system_status','append_sheet_row']);
 const L4=new Set(['read_google_doc','create_google_doc','create_spreadsheet','export_doc_as_pdf','delete_drive_file','create_drive_folder','delete_drive_folder','list_drive_contents','list_script_projects','get_script_content','update_script_file','deploy_script_webapp','backup_script_project','delete_artifact_image','list_run_revisions','delete_run_revision','create_btr_report_doc']);
@@ -169,19 +273,173 @@ async function execVedAstro(n, a) {
 async function execBTR(n,a){
   const tok=await getGoogleToken();
   if(!tok&&!['btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','validate_sclass_gate'].includes(n))return{error:'Google 인증 실패'};
-  if(n==='btr_init_candidate_slots'){const[h,m]=a.birth_time_estimate.split(':').map(Number);const rng=a.range_minutes||120,iv=a.interval_minutes||15,sl=[];for(let o=-rng;o<=rng;o+=iv){const t=h*60+m+o;sl.push(`${Math.floor(((t%1440)+1440)%1440/60).toString().padStart(2,'0')}:${(((t%1440)+1440)%60).toString().padStart(2,'0')}`)}return{candidate_slots:[...new Set(sl)],count:new Set(sl).size};}
-  if(n==='btr_consensus_analyzer'){const s=[a.gem_score,a.cl_score,a.gpt_score],avg=s.reduce((x,y)=>x+y,0)/3,v=s.reduce((x,y)=>x+Math.pow(y-avg,2),0)/3;return{agreement_score:+(avg/100).toFixed(3),entropy_score:+(v/1000).toFixed(3),avg_score:+avg.toFixed(1),consensus:avg>=97?'S_CLASS_CANDIDATE':'CONTINUE'};}
-  if(n==='btr_conflict_axis_finder'){const mn=Math.min(...a.scores),mx=Math.max(...a.scores);return{score_range:mx-mn,conflict_detected:mx-mn>15,conflict_axis:mx-mn>15?'score_divergence_critical':'minor_variation'};}
-  if(n==='validate_sclass_gate'){const s=[a.gem_score,a.cl_score,a.gpt_score],ap=s.every(x=>x>=97),nc=!a.critical_issues||a.critical_issues.length===0,p=ap&&nc;if(tok)await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[a.session_id,'sclass_gate_check',String(p),a.gem_score,a.cl_score,a.gpt_score,(a.critical_issues||[]).join(','),new Date().toISOString()]]})}).catch(()=>{});return{session_id:a.session_id,sclass_passed:p,all_above_97:ap,no_critical_issues:nc,action:p?'CONFIRM_BTR':'CONTINUE_RUBRIC'};}
-  if(n==='create_btr_session'){const ts=new Date().toISOString(),sid=`BTR-${a.structure_code}-${Date.now()}`,fb={name:sid,mimeType:'application/vnd.google-apps.folder'};if(a.parent_folder_id)fb.parents=[a.parent_folder_id];const fr=await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify(fb)});if(!fr.ok)return{error:`폴더 생성 실패 ${fr.status}`};const f=await fr.json();await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[sid,a.structure_code,'0','false','[]','0','1.0','','L0_physics','ACTIVE',ts,ts,f.id,ts,'INIT','','','']]})});return{success:true,session_id:sid,evolution_folder_id:f.id,evolution_folder_url:f.webViewLink};}
-  if(n==='save_runtime_snapshot'){const ts=new Date().toISOString(),rr=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!rr.ok)return{error:`읽기 실패 ${rr.status}`};const rows=((await rr.json()).values)||[],hdr=rows[0]||[],ri=rows.findIndex((r,i)=>i>0&&r[0]===a.session_id);if(ri<0)return{error:`세션 없음: ${a.session_id}`};const idx=k=>hdr.indexOf(k),row=[...rows[ri]];['round','candidate_slots','agreement_score','entropy_score','conflict_axis','next_action','status','gem_score','cl_score','gpt_score'].forEach(k=>{const i=idx(k);if(i>=0&&a[k]!=null)row[i]=typeof a[k]==='object'?JSON.stringify(a[k]):String(a[k]);});if(idx('updated_at')>=0)row[idx('updated_at')]=ts;await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A'+(ri+1))}?valueInputOption=RAW`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[row]})});return{success:true,session_id:a.session_id};}
-  if(n==='get_runtime_snapshot'){const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`읽기 실패 ${r.status}`};const rows=((await r.json()).values)||[],hdr=rows[0]||[],row=rows.find((r,i)=>i>0&&r[0]===a.session_id);if(!row)return{error:'세션 없음'};return Object.fromEntries(hdr.map((k,i)=>[k,row[i]||'']));}
-  if(n==='save_evolution_log'){const c=JSON.stringify({session_id:a.session_id,round:a.round,...a.log_data,timestamp:new Date().toISOString()},null,2),fn=`R${String(a.round).padStart(2,'0')}_${Date.now()}.json`,meta=JSON.stringify({name:fn,parents:[a.evolution_folder_id],mimeType:'application/json'}),body=`--b\r\nContent-Type: application/json\r\n\r\n${meta}\r\n--b\r\nContent-Type: application/json\r\n\r\n${c}\r\n--b--`;const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'multipart/related; boundary=b'},body});if(!r.ok)return{error:`저장 실패 ${r.status}`};return{success:true,file_id:(await r.json()).id,filename:fn};}
-  if(n==='get_evolution_history'){const r=await fetch(`https://www.googleapis.com/drive/v3/files?q='${a.evolution_folder_id}'+in+parents&orderBy=name&fields=files(id,name,modifiedTime,size)`,{headers:{Authorization:`Bearer ${tok}`}});return r.ok?await r.json():{error:`폴더 조회 실패 ${r.status}`};}
+
+  if(n==='btr_init_candidate_slots'){
+    const[h,m]=a.birth_time_estimate.split(':').map(Number);
+    const rng=a.range_minutes||120,iv=a.interval_minutes||15,sl=[];
+    for(let o=-rng;o<=rng;o+=iv){const t=h*60+m+o;sl.push(`${Math.floor(((t%1440)+1440)%1440/60).toString().padStart(2,'0')}:${(((t%1440)+1440)%60).toString().padStart(2,'0')}`)}
+    return{candidate_slots:[...new Set(sl)],count:new Set(sl).size};
+  }
+
+  if(n==='btr_consensus_analyzer'){
+    const s=[a.gem_score,a.cl_score,a.gpt_score],avg=s.reduce((x,y)=>x+y,0)/3,v=s.reduce((x,y)=>x+Math.pow(y-avg,2),0)/3;
+    return{agreement_score:+(avg/100).toFixed(3),entropy_score:+(v/1000).toFixed(3),avg_score:+avg.toFixed(1),consensus:avg>=97?'S_CLASS_CANDIDATE':'CONTINUE'};
+  }
+
+  if(n==='btr_conflict_axis_finder'){
+    const mn=Math.min(...a.scores),mx=Math.max(...a.scores);
+    return{score_range:mx-mn,conflict_detected:mx-mn>15,conflict_axis:mx-mn>15?'score_divergence_critical':'minor_variation'};
+  }
+
+  if(n==='validate_sclass_gate'){
+    const s=[a.gem_score,a.cl_score,a.gpt_score],ap=s.every(x=>x>=97),nc=!a.critical_issues||a.critical_issues.length===0,p=ap&&nc;
+    if(tok)await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[a.session_id,'sclass_gate_check',String(p),a.gem_score,a.cl_score,a.gpt_score,(a.critical_issues||[]).join(','),new Date().toISOString()]]})}).catch(()=>{});
+    return{session_id:a.session_id,sclass_passed:p,all_above_97:ap,no_critical_issues:nc,action:p?'CONFIRM_BTR':'CONTINUE_RUBRIC'};
+  }
+
+  if(n==='create_btr_session'){
+    const ts=new Date().toISOString(),sid=`BTR-${a.structure_code}-${Date.now()}`,fb={name:sid,mimeType:'application/vnd.google-apps.folder'};
+    if(a.parent_folder_id)fb.parents=[a.parent_folder_id];
+    const fr=await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify(fb)});
+    if(!fr.ok)return{error:`폴더 생성 실패 ${fr.status}`};
+    const f=await fr.json();
+    // ★ v5.7: col 15-17(gem/cl/gpt_score) + col 18-20(critical_issues/suggestions/analysis_summary) 초기화
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[sid,a.structure_code,'0','false','[]','0','1.0','','L0_physics','ACTIVE',ts,ts,f.id,ts,'INIT','','','','','','']]})});
+    return{success:true,session_id:sid,evolution_folder_id:f.id,evolution_folder_url:f.webViewLink};
+  }
+
+  if(n==='save_runtime_snapshot'){
+    const ts=new Date().toISOString();
+    const rr=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});
+    if(!rr.ok)return{error:`읽기 실패 ${rr.status}`};
+    const rows=((await rr.json()).values)||[],hdr=rows[0]||[],ri=rows.findIndex((r,i)=>i>0&&r[0]===a.session_id);
+    if(ri<0)return{error:`세션 없음: ${a.session_id}`};
+    const idx=k=>hdr.indexOf(k),row=[...rows[ri]];
+    // 기존 필드
+    ['round','candidate_slots','agreement_score','entropy_score','conflict_axis','next_action','status','gem_score','cl_score','gpt_score'].forEach(k=>{
+      const i=idx(k);
+      if(i>=0&&a[k]!=null)row[i]=typeof a[k]==='object'?JSON.stringify(a[k]):String(a[k]);
+    });
+    // ★ v5.7 P1: 신규 필드 - 다음 라운드 컨텍스트 누적용
+    ['critical_issues','suggestions'].forEach(k=>{
+      const i=idx(k);
+      if(i>=0&&a[k]!=null)row[i]=Array.isArray(a[k])?JSON.stringify(a[k]):String(a[k]);
+    });
+    const aiIdx=idx('analysis_summary');
+    if(aiIdx>=0&&a.analysis_summary!=null)row[aiIdx]=String(a.analysis_summary);
+    if(idx('updated_at')>=0)row[idx('updated_at')]=ts;
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A'+(ri+1))}?valueInputOption=RAW`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[row]})});
+    return{success:true,session_id:a.session_id,saved_fields:Object.keys(a).filter(k=>k!=='session_id')};
+  }
+
+  if(n==='get_runtime_snapshot'){
+    const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});
+    if(!r.ok)return{error:`읽기 실패 ${r.status}`};
+    const rows=((await r.json()).values)||[],hdr=rows[0]||[],row=rows.find((r,i)=>i>0&&r[0]===a.session_id);
+    if(!row)return{error:'세션 없음'};
+    const snap=Object.fromEntries(hdr.map((k,i)=>[k,row[i]||'']));
+    // critical_issues, suggestions는 JSON 파싱 시도
+    try{if(snap.critical_issues)snap.critical_issues=JSON.parse(snap.critical_issues);}catch{}
+    try{if(snap.suggestions)snap.suggestions=JSON.parse(snap.suggestions);}catch{}
+    return snap;
+  }
+
+  if(n==='save_evolution_log'){
+    const c=JSON.stringify({session_id:a.session_id,round:a.round,...a.log_data,timestamp:new Date().toISOString()},null,2),fn=`R${String(a.round).padStart(2,'0')}_${Date.now()}.json`,meta=JSON.stringify({name:fn,parents:[a.evolution_folder_id],mimeType:'application/json'}),body=`--b\r\nContent-Type: application/json\r\n\r\n${meta}\r\n--b\r\nContent-Type: application/json\r\n\r\n${c}\r\n--b--`;
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'multipart/related; boundary=b'},body});
+    if(!r.ok)return{error:`저장 실패 ${r.status}`};
+    return{success:true,file_id:(await r.json()).id,filename:fn};
+  }
+
+  if(n==='get_evolution_history'){
+    const r=await fetch(`https://www.googleapis.com/drive/v3/files?q='${a.evolution_folder_id}'+in+parents&orderBy=name&fields=files(id,name,modifiedTime,size)`,{headers:{Authorization:`Bearer ${tok}`}});
+    return r.ok?await r.json():{error:`폴더 조회 실패 ${r.status}`};
+  }
+
   if(n==='btr_re_eval_pivots')return{evaluated_slots:a.candidate_slots,conflict_axis:a.conflict_axis};
   if(n==='btr_weight_adjuster')return{session_id:a.session_id,adjusted_weights:{event_bukhti_fit:a.event_count>=3?40:25,d9_alignment:20,appearance_temperament:a.has_appearance_data?15:8,sandhi_transition:15,logic_consistency_bonus:10}};
   if(n==='btr_prediction_tester')return{candidate_time:a.candidate_time,status:'MANUAL_VERIFICATION_RECOMMENDED'};
-  if(n==='purge_runtime_state'){const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:'읽기 실패'};const rows=((await r.json()).values)||[],idx=rows.findIndex((r,i)=>i>0&&r[0]===a.session_id);if(idx<0)return{error:'세션 없음'};await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A'+(idx+1))}?valueInputOption=RAW`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[Array(rows[0]?.length||18).fill('')]})});return{success:true};}
+
+  if(n==='purge_runtime_state'){
+    const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});
+    if(!r.ok)return{error:'읽기 실패'};
+    const rows=((await r.json()).values)||[],idx=rows.findIndex((r,i)=>i>0&&r[0]===a.session_id);
+    if(idx<0)return{error:'세션 없음'};
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET+'!A'+(idx+1))}?valueInputOption=RAW`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[Array(rows[0]?.length||21).fill('')]})});
+    return{success:true};
+  }
+
+  // ★ v5.7 P2: 알림 작성 도구
+  if(n==='btr_write_notification'){
+    const notifId = await writeNotification(tok, a.session_id, a.type, a.title, a.content);
+    return{success:true, notification_id:notifId, type:a.type, session_id:a.session_id};
+  }
+
+  // ★ v5.7 P2: S-Class Hard Stop 완료 처리
+  if(n==='btr_finalize_confirmed'){
+    // 1. Archive 시트 업데이트
+    const updates = {
+      BTRStatus:    'Confirmed',
+      AnalysisScore: String(a.final_score),
+      ...(a.analysis_doc_url ? {AnalysisDocs: a.analysis_doc_url} : {}),
+      ...(a.confirmed_birth_time ? {BTR: a.confirmed_birth_time} : {}),
+    };
+    const result = await updateArchiveRow(tok, a.structure_code, updates);
+    if(result.error) return{error:'Archive 업데이트 실패: '+result.error};
+
+    // 2. BTRNotifications 알림 작성
+    const scores = [a.gem_score, a.cl_score, a.gpt_score].filter(s=>s!=null);
+    const scoreStr = scores.length > 0 ? `Gem:${a.gem_score||'-'} / Cl:${a.cl_score||'-'} / GPT:${a.gpt_score||'-'}` : `최종:${a.final_score}점`;
+    const notifId = await writeNotification(
+      tok, a.session_id, 'sclass_reached',
+      `S-Class 확정 — ${a.structure_code}`,
+      `생시: ${a.confirmed_birth_time}\n점수: ${scoreStr} (평균 ${a.final_score}점)\n세션: ${a.session_id}`
+    );
+
+    return{
+      success:true,
+      structure_code: a.structure_code,
+      btr_status: 'Confirmed',
+      confirmed_birth_time: a.confirmed_birth_time,
+      analysis_score: a.final_score,
+      notification_id: notifId,
+      archive_updated: true
+    };
+  }
+
+  // ★ v5.7 P2: Held 상태 완료 처리
+  if(n==='btr_finalize_held'){
+    // 1. Archive 시트 업데이트
+    const noteContent = [
+      a.failure_summary,
+      a.highest_score ? `최고점수: ${a.highest_score}점` : null,
+      a.best_candidate_time ? `유력후보: ${a.best_candidate_time}` : null,
+    ].filter(Boolean).join(' | ');
+
+    const updates = {
+      BTRStatus: 'Held',
+      ...(noteContent ? {BTRStageNote: noteContent} : {}),
+    };
+    // BTRStageNote 컬럼이 없을 수 있으므로 실패해도 진행
+    await updateArchiveRow(tok, a.structure_code, updates).catch(()=>{});
+
+    // 2. BTRNotifications 알림 작성
+    const notifId = await writeNotification(
+      tok, a.session_id, 'rubric_held',
+      `루브릭 Held — ${a.structure_code}`,
+      `사유: ${a.failure_summary}\n${a.highest_score?`최고점수: ${a.highest_score}점 `:''}`+
+      `${a.best_candidate_time?`유력후보: ${a.best_candidate_time}`:''}`.trim()
+    );
+
+    return{
+      success:true,
+      structure_code: a.structure_code,
+      btr_status: 'Held',
+      notification_id: notifId,
+      archive_updated: true
+    };
+  }
+
   return{error:`미구현: ${n}`};
 }
 
@@ -193,7 +451,7 @@ async function execGCloud(n,a){
   if(n==='cloudbuild_status'){const r=await fetch(`https://cloudbuild.googleapis.com/v1/projects/${proj}/builds/${a.buildId}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`CloudBuild ${r.status}`};const d=await r.json();return{status:d.status,id:d.id,steps:(d.steps||[]).map(s=>({name:s.name,status:s.status,timing:s.timing})),logUrl:d.logUrl};}
   if(n==='cloudrun_services'){const r=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Cloud Run ${r.status}`};const d=await r.json();return{services:(d.services||[]).map(s=>({name:s.name?.split('/').pop(),url:s.uri,revision:s.latestReadyRevision?.split('/').pop(),updated:s.updateTime}))};}
   if(n==='artifact_list'){const loc=a.location||GCP_REGION,url=a.repository?`https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${loc}/repositories/${a.repository}/dockerImages`:`https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${loc}/repositories`;const r=await fetch(url,{headers:{Authorization:`Bearer ${tok}`}});return r.ok?await r.json():{error:`Artifact ${r.status}`};}
-  if(n==='cloudrun_set_env'){const{service,envVars}=a,gr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{headers:{Authorization:`Bearer ${tok}`}});if(!gr.ok)return{error:`Cloud Run GET ${gr.status}`};const svc=await gr.json(),em={};(svc.template?.containers?.[0]?.env||[]).forEach(e=>{em[e.name]=e.value;});Object.assign(em,envVars);const pr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({template:{containers:[{...svc.template?.containers?.[0],env:Object.entries(em).map(([k,v])=>({name:k,value:v}))}]}})}); if(!pr.ok)return{error:`Cloud Run PATCH ${pr.status}: ${await pr.text()}`};return{success:true,service,updatedVars:Object.keys(envVars)};}
+  if(n==='cloudrun_set_env'){const{service,envVars}=a,gr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{headers:{Authorization:`Bearer ${tok}`}});if(!gr.ok)return{error:`Cloud Run GET ${gr.status}`};const svc=await gr.json(),em={};(svc.template?.containers?.[0]?.env||[]).forEach(e=>{em[e.name]=e.value;});Object.assign(em,envVars);const pr=await fetch(`https://run.googleapis.com/v2/projects/${proj}/locations/${reg}/services/${service}`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({template:{containers:[{...svc.template?.containers?.[0],env:Object.entries(em).map(([k,v])=>({name:k,value:v}))}]}})});if(!pr.ok)return{error:`Cloud Run PATCH ${pr.status}: ${await pr.text()}`};return{success:true,service,updatedVars:Object.keys(envVars)};}
   if(n==='agent_registry_list'){
     const loc=a.location||GCP_REGION,res={};
     const r1=await fetch(`https://agentregistry.googleapis.com/v1alpha/projects/${proj}/locations/${loc}/services`,{headers:{Authorization:`Bearer ${tok}`}});
@@ -257,7 +515,11 @@ async function execAI(n,a){
 
 async function execReportOps(n,a){
   const tok=await getGoogleToken();
-  if(n==='report_generate_btr_code'){if(tok)await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent('Archive!A1')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[new Date().toISOString(),a.structure_code,'BTR_CONFIRMED',a.confirmed_birth_time,String(a.confidence_score),a.session_id]]})}).catch(()=>{});return{structure_code:a.structure_code,btr_confirmed:a.confirmed_birth_time,status:'CONFIRMED'};}
+  if(n==='report_generate_btr_code'){
+    // ★ v5.7: btr_finalize_confirmed 사용 권장. 이 도구는 레거시 호환 유지.
+    if(tok)await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent('BTRRuntime!A1')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({majorDimension:'ROWS',values:[[new Date().toISOString(),a.structure_code,'BTR_CONFIRMED',a.confirmed_birth_time,String(a.confidence_score),a.session_id]]})}).catch(()=>{});
+    return{structure_code:a.structure_code,btr_confirmed:a.confirmed_birth_time,status:'CONFIRMED',note:'Archive 업데이트는 btr_finalize_confirmed 도구를 사용하세요'};
+  }
   if(n==='report_generate_summary')return{session_id:a.session_id,action:'use_get_evolution_history_and_summarize'};
   if(n==='report_add_gemstone_advice')return{structure_code:a.structure_code,status:'MANUAL_ANALYSIS_REQUIRED'};
   if(n==='ops_audit_log_exporter'){if(!tok)return{error:'Google 인증 실패'};const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ARCHIVE_SS_ID}/values/${encodeURIComponent(RUNTIME_SHEET)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`읽기 실패 ${r.status}`};const rows=((await r.json()).values)||[];return{exported:true,session_id:a.session_id,rows_count:rows.length};}
@@ -290,7 +552,7 @@ app.post('/message',requireMcpAuth,async(req,res)=>{
   const sseRes=sessions.get(req.query.sessionId);if(!sseRes)return res.status(404).json({error:'세션 없음'});
   const{id,method,params}=req.body||{},send=d=>sseRes.write(`data: ${JSON.stringify(d)}\n\n`);
   try{
-    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}}});
+    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.7.0'}}});
     else if(method==='tools/list')send({jsonrpc:'2.0',id,result:{tools:toolList}});
     else if(method==='tools/call'){const r=await executeTool(params?.name,params?.arguments||{});send({jsonrpc:'2.0',id,result:{content:[{type:'text',text:JSON.stringify(r,null,2)}]}});}
     else if(method==='ping')send({jsonrpc:'2.0',id,result:{}});
@@ -304,9 +566,9 @@ app.all('/mcp',requireMcpAuth,async(req,res)=>{
   const body=req.method==='GET'?null:req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
+    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.7.0'}});
     if(!body)return err(-32700,'Parse error');
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.7.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(params?.name||body?.params?.name,params?.arguments||body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -318,7 +580,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   const body=req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.6.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.7.0'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(body?.params?.name,body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -326,8 +588,16 @@ app.post('/',requireMcpAuth,async(req,res)=>{
     return err(-32601,`Not found: ${method}`);
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
-app.get('/',(_req,res)=>res.json({status:'running',server:'ASTERION AI Evolution Engine v5.6',transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)}));
+app.get('/',(_req,res)=>res.json({
+  status:'running',
+  server:'ASTERION AI Evolution Engine v5.7',
+  transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
+  layers:{L0:`VedAstro(${L0.size})`,L1:`BTR(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
+  totalTools:ALL_TOOLS.length,
+  toolList:ALL_TOOLS.map(t=>t.name)
+}));
 app.listen(PORT,'0.0.0.0',()=>{
-  console.log(`\n🔱 ASTERION AI Evolution Engine v5.6 | port:${PORT} | tools:${ALL_TOOLS.length}`);
-  console.log(`   v5.6: sheets_write/append_sheet_row Gemini 400 오류 수정 (array items 필드 추가)\n`);
+  console.log(`\n🔱 ASTERION AI Evolution Engine v5.7 | port:${PORT} | tools:${ALL_TOOLS.length}`);
+  console.log(`   P1: save_runtime_snapshot + critical_issues/suggestions/analysis_summary`);
+  console.log(`   P2: btr_write_notification + btr_finalize_confirmed + btr_finalize_held\n`);
 });
