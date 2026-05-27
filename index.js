@@ -6,7 +6,7 @@
  *              / EFFECTS_CATALOG(전체 효과 프리셋) / VOICE_CONFIG / SECTION_PRESETS / VIDEO_META_TEMPLATE
  *   - video_create_script: A-R 18컬럼 지원
  *   - video_read_script: A-R 18컬럼 파싱
- * v5.10: Video Automation 5개 도구 추가
+ * v5.11.1: fix syntax error in execSystem append_sheet_row (remove semicolon inside object literal)
  */
 
 import express from 'express';
@@ -114,10 +114,8 @@ async function updateArchiveRow(tok, structure_code, updates) {
   return {success:true, row_index:ri};
 }
 
-// ══ VIDEO AUTOMATION 효과 데이터 (명세서 v1.1 기반) ══
 const EFFECTS_CATALOG_DATA = [
   ['Effect_ID','Category','Name_KO','Description','Parameters','Use_Case','Section_Default','Source_File'],
-  // ── 카드 애니메이션 (A-G) ──
   ['CARD_ANIM_A','CARD_ANIM','왼쪽진입/상단퇴장','X=-w+(W*0.1+w)*t 진입, Y=H*0.2 체류, 상단퇴장','T_in:1s T_hold:auto T_out:1s','TPL-PLA 분석행, TPL-TIM 홀수','TPL-PLA','AiCardAnimationBaseView.java'],
   ['CARD_ANIM_B','CARD_ANIM','오른쪽진입/하단퇴장','X=W-(W-W*0.5)*t 진입, Y=H*0.2 체류, 하단퇴장','T_in:1s T_hold:auto T_out:1s','TPL-TIM 짝수, TPL-SYN','TPL-TIM(짝수)','AiCardAnimationBaseView.java'],
   ['CARD_ANIM_C','CARD_ANIM','상단진입/하단퇴장','Y=-h+(H*0.2+h)*t 진입, X=W*0.3 고정, 하단퇴장','T_in:1s T_hold:auto T_out:1s','TPL-INT, TPL-SUM, TITLE스타일','TPL-INT','AiCardAnimationBaseView.java'],
@@ -125,7 +123,6 @@ const EFFECTS_CATALOG_DATA = [
   ['CARD_ANIM_E','CARD_ANIM','베지어 곡선 진입','ease-in-out: 좌하단→중앙 진입, 우상단 퇴장','T_in:1s T_hold:auto T_out:1s','TPL-INT 오프닝, 특별강조구간','TPL-SYN','PathKeyframeAnimation.java KeyFrameCurveFragment.java'],
   ['CARD_ANIM_F','CARD_ANIM','스케일 팝업','scale 0.3→1.0(ease-out 0.5s), 체류, 1.0→0.0(ease-in 0.5s)','T_in:0.5s T_hold:auto T_out:0.5s','NOTICE, 핵심수치 강조','TPL-SUM(저점)','TransformKeyframeAnimation.java'],
   ['CARD_ANIM_G','CARD_ANIM','회전+스케일 진입','rotation -15deg→0 + scale 0.5→1.0(1s), 퇴장 rotation+scale','T_in:1s T_hold:auto T_out:0.5s','TPL-PLA 행성 첫등장, 강조수치','TPL-PLA(첫행)','TransformKeyframeAnimation.java PointKeyframeAnimation.java'],
-  // ── 배경 전환 효과 ──
   ['BG_FADE','BG_TRANSITION','알파 디졸브','기본 투명도 전환 (기본값)','duration:1.0s','모든 구간(기본값)','ALL','VideoTransitionCollection.java'],
   ['BG_SLIDE_LEFT','BG_TRANSITION','왼쪽 밀려오기','현재 씬→다음 씬 좌→우 슬라이드','duration:1.0s','TPL-INT→TPL-PLA 구간전환','TPL-INT→TPL-PLA','TimelineTransitionDrawable2.java'],
   ['BG_SLIDE_UP','BG_TRANSITION','아래서 올라오기','다음 씬이 하단에서 상승','duration:1.0s','TPL-TIM 시간대 전환','TPL-TIM','TimelineTransitionDrawable2.java'],
@@ -133,33 +130,27 @@ const EFFECTS_CATALOG_DATA = [
   ['BG_ZOOM_OUT','BG_TRANSITION','축소 전환','현재 씬이 축소되며 퇴장','duration:1.0s','TPL-SYN 종합구간','TPL-SYN','TimelineTransitionDrawable2.java'],
   ['BG_BLUR_FADE','BG_TRANSITION','블러+페이드','블러 적용 후 디졸브','duration:1.0s','TPL-SUM 저점구간','TPL-SUM(저점)','ISXMotionBlurEffectMTIFilter.java'],
   ['BG_WIPE_RIGHT','BG_TRANSITION','오른쪽 닦아내기','현재→다음 우측으로 와이프','duration:1.0s','구간 경계 전환','구간전환','TimelineTransitionDrawable2.java'],
-  // ── 배경 비디오 효과 ──
   ['BG_EF_NONE','BG_EFFECT','효과없음','기본값 — 효과 미적용','-','모든 일반구간','ALL','-'],
   ['BG_EF_MOTION_BLUR','BG_EFFECT','모션 블러','역동감 연출','intensity:0.0-1.0 (권장 0.3-0.5)','역동적 행성 분석','TPL-PLA','ISXMotionBlurEffectMTIFilter.java'],
   ['BG_EF_EDGE_GLOW','BG_EFFECT','엣지 발광','신비감/영적 분위기 연출','intensity:0.0-1.0 (권장 0.3-0.5)','행성분석 신비구간','TPL-PLA','GPUEdgeFilter.java'],
   ['BG_EF_VIGNETTE','BG_EFFECT','주변부 어둡게','화면 집중 유도','intensity:0.0-1.0 (권장 0.4)','일반 분석구간','ALL','-'],
-  // ── 카드 스타일 ──
   ['CARD_DEFAULT','CARD_STYLE','반투명 블랙 박스','alpha:0.75 일반 분석 박스','alpha:0.75','일반 분석 내용','ALL','ISBlendEffectFilter.java GPUImageTwoInputFilter.java'],
   ['CARD_TITLE','CARD_STYLE','대형 중앙 타이틀 박스','alpha:0.85 중앙 대형 타이틀','alpha:0.85','TPL-INT 오프닝','TPL-INT','ISBlendEffectFilter.java'],
   ['CARD_CONCLUSION','CARD_STYLE','하단 고정 결론 바','alpha:0.90 화면 하단 고정','alpha:0.90','TPL-SUM 정점, TPL-SYN 종합','TPL-SUM TPL-SYN','ISBlendEffectFilter.java'],
   ['CARD_NOTICE','CARD_STYLE','경고/주의 박스 (테두리강조)','alpha:0.80 + 경고색 테두리','alpha:0.80','리스크/주의 구간','TPL-SUM(저점)','ISBlendEffectFilter.java'],
   ['CARD_MINIMAL','CARD_STYLE','텍스트만 (박스없음)','alpha:0.00 텍스트 레이어만','alpha:0.00','보조 레이블, 부연설명','보조','ISBlendEffectFilter.java'],
   ['CARD_NONE','CARD_STYLE','카드없음','레이어 미적용','-','TPL-BUF 버퍼 (무음)','TPL-BUF','-'],
-  // ── 카드 추가 효과 ──
-  ['FX_HEARTBEAT','CARD_EXTRA','심박 스케일 펄스','주기적 scale 파동 — 강조감','주기:자동',  '핵심수치 등장, 정점 강조','TPL-SUM(정점)','GPUHeartBeatFilter.java'],
+  ['FX_HEARTBEAT','CARD_EXTRA','심박 스케일 펄스','주기적 scale 파동 — 강조감','주기:자동','핵심수치 등장, 정점 강조','TPL-SUM(정점)','GPUHeartBeatFilter.java'],
   ['FX_VIBRATE','CARD_EXTRA','진동 효과','짧은 X축 진동 — 경고감','amplitude:auto','NOTICE, 경고/주의 구간','TPL-SUM(저점)','GPUVibrateFilter.java'],
   ['FX_NONE','CARD_EXTRA','추가효과없음','기본값','-','모든 일반구간','ALL','-'],
-  // ── 그라디언트 프리셋 ──
   ['GRAD_DEFAULT','GRADIENT','블랙→딥네이비 (수직)','rgba(0,0,0,0.85)→rgba(10,5,30,0.60)','방향:top→bottom','DEFAULT 카드','DEFAULT','GradientFillContent.java'],
   ['GRAD_TITLE','GRADIENT','딥퍼플→블랙 (수직)','rgba(30,0,50,0.85)→rgba(0,0,0,0.90)','방향:top→bottom','TITLE 카드','TITLE','GradientFillContent.java'],
   ['GRAD_CONCLUSION','GRADIENT','딥네이비→블랙 (수직)','rgba(0,5,30,0.90)→rgba(0,0,0,0.90)','방향:top→bottom','CONCLUSION 카드','CONCLUSION','GradientFillContent.java'],
   ['GRAD_NOTICE','GRADIENT','딥레드→블랙 (수직)','rgba(50,5,5,0.85)→rgba(0,0,0,0.90)','방향:top→bottom','NOTICE 카드','NOTICE','GradientFillContent.java'],
-  // ── Lottie 애니메이션 ──
   ['LOTTIE_PLANET','LOTTIE','행성 심볼 JSON','planet_symbol_{행성}.json — 행성 테마컬러 런타임 교체','size:120x120px pos:카드좌측 play:1회','TPL-PLA 행성 첫등장행','TPL-PLA(첫행)','LottieAnimationView.java LottieValueCallback.java'],
   ['LOTTIE_ENERGY','LOTTIE','에너지 흐름 오버레이','energy_flow.json','size:전체화면 play:loop','TPL-SUM 정점구간','TPL-SUM(정점)','LottieDrawable.java LottieValueAnimator.java'],
   ['LOTTIE_STARBURST','LOTTIE','별 폭발 효과','star_burst.json','size:80x80px pos:Highlight주변 play:1회','핵심수치 등장행','핵심수치행','LottieDrawable.java'],
   ['LOTTIE_MANDALA','LOTTIE','만다라 회전 (오프닝)','mandala_rotate.json','size:200x200px pos:화면중앙하단 play:loop','TPL-INT 오프닝 전체','TPL-INT','LottieValueAnimator.java LottieCompositionMoshiParser.java'],
-  // ── 행성 테마 컬러 (LottieValueCallback) ──
   ['COLOR_SUN','PLANET_COLOR','태양 테마컬러','#FFB700 — 골드/오렌지','-','태양 관련 씬','TPL-PLA(태양)','LottieValueCallback.java'],
   ['COLOR_MOON','PLANET_COLOR','달 테마컬러','#C8C8FF — 연보라/은빛','-','달 관련 씬','TPL-PLA(달)','LottieValueCallback.java'],
   ['COLOR_MARS','PLANET_COLOR','화성 테마컬러','#FF4444 — 붉은색','-','화성 관련 씬','TPL-PLA(화성)','LottieValueCallback.java'],
@@ -180,45 +171,44 @@ const VOICE_CONFIG_DATA = [
 
 const SECTION_PRESETS_DATA = [
   ['Section','Card_Style','Animation','BG_Transition','Card_ExtraEffect','Lottie_File','Notes'],
-  ['TPL-INT','TITLE','C','FADE','NONE','LOTTIE_MANDALA','오프닝 구간 — 영상 인트로'],
-  ['TPL-PLA_FIRST','DEFAULT','G','SLIDE_LEFT','NONE','LOTTIE_PLANET','행성 첫 등장 행 (행성별 1회)'],
+  ['TPL-INT','TITLE','C','FADE','NONE','LOTTIE_MANDALA','오프닝 구간'],
+  ['TPL-PLA_FIRST','DEFAULT','G','SLIDE_LEFT','NONE','LOTTIE_PLANET','행성 첫 등장 행'],
   ['TPL-PLA_REST','DEFAULT','A','FADE','NONE','NONE','행성 나머지 분석 행'],
   ['TPL-TIM_ODD','DEFAULT','A','FADE','NONE','NONE','TPL-TIM 홀수 시간대'],
   ['TPL-TIM_EVEN','DEFAULT','B','FADE','NONE','NONE','TPL-TIM 짝수 시간대'],
-  ['TPL-SUM_PEAK','CONCLUSION','D','BG_ZOOM_IN','HEARTBEAT','LOTTIE_ENERGY','TPL-SUM 정점 구간 — 핵심 강조'],
-  ['TPL-SUM_TROUGH','NOTICE','F','BG_BLUR_FADE','VIBRATE','NONE','TPL-SUM 저점 구간 — 리스크/주의'],
+  ['TPL-SUM_PEAK','CONCLUSION','D','BG_ZOOM_IN','HEARTBEAT','LOTTIE_ENERGY','TPL-SUM 정점 구간'],
+  ['TPL-SUM_TROUGH','NOTICE','F','BG_BLUR_FADE','VIBRATE','NONE','TPL-SUM 저점 구간'],
   ['TPL-SYN','CONCLUSION','E','BG_ZOOM_OUT','NONE','NONE','TPL-SYN 종합 구간'],
-  ['TPL-BUF','NONE','NONE','FADE','NONE','NONE','TPL-BUF 버퍼 구간 (무음/전환)'],
+  ['TPL-BUF','NONE','NONE','FADE','NONE','NONE','TPL-BUF 버퍼 구간'],
 ];
 
 const VIDEO_META_TEMPLATE_DATA = [
   ['Param','Value','Unit','Description'],
   ['BGM_Volume_Normal','0.35','ratio','TTS 없는 구간 BGM 볼륨'],
   ['BGM_Volume_Ducking','0.10','ratio','TTS 재생 중 BGM 볼륨 (덕킹)'],
-  ['BGM_Fade_In','3.0','sec','영상 시작 페이드인 시간'],
-  ['BGM_Fade_Out','5.0','sec','영상 종료 페이드아웃 시간'],
-  ['BGM_Duck_Attack','0.3','sec','덕킹 시작 전환 시간'],
-  ['BGM_Duck_Release','0.5','sec','덕킹 해제 전환 시간'],
-  ['Video_Width','1920','px','출력 해상도 가로'],
-  ['Video_Height','1080','px','출력 해상도 세로'],
+  ['BGM_Fade_In','3.0','sec','영상 시작 페이드인'],
+  ['BGM_Fade_Out','5.0','sec','영상 종료 페이드아웃'],
+  ['BGM_Duck_Attack','0.3','sec','덕킹 시작 전환'],
+  ['BGM_Duck_Release','0.5','sec','덕킹 해제 전환'],
+  ['Video_Width','1920','px','출력 가로'],
+  ['Video_Height','1080','px','출력 세로'],
   ['Video_FPS','30','fps','출력 프레임레이트'],
-  ['TTS_SampleRate','44100','Hz','TTS 오디오 샘플레이트 (Supertonic 기준)'],
-  ['TTS_Format','PCM_Float32','-','TTS 출력 포맷 — MP3 변환 없이 FFmpeg 직접 피드'],
-  ['Card_Main_FontSize','52','px','Card_Main 텍스트 크기'],
-  ['Card_Sub_FontSize','38','px','Card_Sub 텍스트 크기'],
-  ['Card_Desc_FontSize','32','px','Card_Desc 텍스트 크기'],
-  ['Watermark_FontSize','34','px','상단 워터마크 텍스트 크기'],
-  ['Card_Main_MaxChars','12','char','Card_Main 한 줄 최대 글자수 (초과시 \\N 삽입)'],
-  ['Card_Sub_MaxChars','18','char','Card_Sub 한 줄 최대 글자수'],
-  ['Card_Desc_MaxChars','24','char','Card_Desc 한 줄 최대 글자수'],
-  ['Subtitle_Font','NotoSansKR-Bold','-','기본 자막 폰트'],
-  ['Color_Highlight_Rise','#FFDB4D','-','상승/긍정 키워드 하이라이트 색상'],
-  ['Color_Highlight_Fall','#FFAA00','-','하락/주의 키워드 하이라이트 색상'],
-  ['Color_Highlight_Planet','#00FFD7','-','행성명/전문용어 하이라이트 색상'],
+  ['TTS_SampleRate','44100','Hz','TTS 샘플레이트'],
+  ['TTS_Format','PCM_Float32','-','TTS 출력 포맷'],
+  ['Card_Main_FontSize','52','px','Card_Main 크기'],
+  ['Card_Sub_FontSize','38','px','Card_Sub 크기'],
+  ['Card_Desc_FontSize','32','px','Card_Desc 크기'],
+  ['Watermark_FontSize','34','px','워터마크 크기'],
+  ['Card_Main_MaxChars','12','char','Card_Main 최대 글자수'],
+  ['Card_Sub_MaxChars','18','char','Card_Sub 최대 글자수'],
+  ['Card_Desc_MaxChars','24','char','Card_Desc 최대 글자수'],
+  ['Subtitle_Font','NotoSansKR-Bold','-','자막 폰트'],
+  ['Color_Highlight_Rise','#FFDB4D','-','긍정 하이라이트'],
+  ['Color_Highlight_Fall','#FFAA00','-','주의 하이라이트'],
+  ['Color_Highlight_Planet','#00FFD7','-','행성명 하이라이트'],
 ];
 
 const ALL_TOOLS = [
-  // ── L0: VedAstro ──
   {name:'geocode_location',description:'출생지를 위도/경도로 변환.',inputSchema:{type:'object',properties:{location:{type:'string'}},required:['location']}},
   {name:'get_timezone',description:'위도/경도+날짜로 타임존 반환.',inputSchema:{type:'object',properties:{latitude:{type:'number'},longitude:{type:'number'},dateTime:{type:'string'}},required:['latitude','longitude','dateTime']}},
   {name:'get_planet_positions',description:'행성 D1 라시·도수·역행.',inputSchema:{type:'object',properties:{dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['dateTime','latitude','longitude']}},
@@ -240,15 +230,13 @@ const ALL_TOOLS = [
   {name:'get_ashtakvarga_data',description:'아슈타크바르가 차트.',inputSchema:{type:'object',properties:{birth_date:{type:'string'},birth_time:{type:'string'},latitude:{type:'string'},longitude:{type:'string'},timezone:{type:'string'}},required:['birth_date','birth_time','latitude','longitude','timezone']}},
   {name:'astro_check_retrograde',description:'행성 역행 여부.',inputSchema:{type:'object',properties:{planet:{type:'string'},dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['planet','dateTime','latitude','longitude']}},
   {name:'astro_planetary_war_check',description:'그라하 유다(행성 전쟁) 감지.',inputSchema:{type:'object',properties:{dateTime:{type:'string'},latitude:{type:'number'},longitude:{type:'number'},timezone:{type:'string'}},required:['dateTime','latitude','longitude']}},
-
-  // ── L1: BTR ──
   {name:'create_btr_session',description:'BTR 분석 세션 초기화.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},birth_data:{type:'string'},parent_folder_id:{type:'string'}},required:['structure_code','birth_data']}},
   {name:'save_runtime_snapshot',description:'BTR 라운드 상태 저장.',inputSchema:{type:'object',properties:{session_id:{type:'string'},round:{type:'number'},candidate_slots:{type:'array',items:{type:'string'}},agreement_score:{type:'number'},entropy_score:{type:'number'},conflict_axis:{type:'string'},next_action:{type:'string',enum:['L0_physics','rubric_continue','question_generation','full_reset','sclass_validation','report_generation']},status:{type:'string',enum:['ACTIVE','QUESTION_MODE','RESET','SCLASS_REACHED','HELD']},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'},critical_issues:{type:'array',items:{type:'string'}},suggestions:{type:'array',items:{type:'string'}},analysis_summary:{type:'string'}},required:['session_id','round','candidate_slots','agreement_score','entropy_score','next_action']}},
   {name:'get_runtime_snapshot',description:'BTRRuntime 세션 조회.',inputSchema:{type:'object',properties:{session_id:{type:'string'}},required:['session_id']}},
   {name:'purge_runtime_state',description:'BTRRuntime 세션 삭제.',inputSchema:{type:'object',properties:{session_id:{type:'string'}},required:['session_id']}},
   {name:'save_evolution_log',description:'BTR 진화 로그 Drive 저장.',inputSchema:{type:'object',properties:{session_id:{type:'string'},evolution_folder_id:{type:'string'},round:{type:'number'},log_data:{type:'object'}},required:['session_id','evolution_folder_id','round','log_data']}},
   {name:'get_evolution_history',description:'BTR 로그 파일 목록.',inputSchema:{type:'object',properties:{evolution_folder_id:{type:'string'}},required:['evolution_folder_id']}},
-  {name:'validate_sclass_gate',description:'S-Class 조건 확인: 세 AI 97점↑ AND critical_issues 없음.',inputSchema:{type:'object',properties:{session_id:{type:'string'},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'},critical_issues:{type:'array',items:{type:'string'}}},required:['session_id','gem_score','cl_score','gpt_score','critical_issues']}},
+  {name:'validate_sclass_gate',description:'S-Class 조건 확인.',inputSchema:{type:'object',properties:{session_id:{type:'string'},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'},critical_issues:{type:'array',items:{type:'string'}}},required:['session_id','gem_score','cl_score','gpt_score','critical_issues']}},
   {name:'btr_init_candidate_slots',description:'BTR 초기 후보 생시 슬롯.',inputSchema:{type:'object',properties:{birth_time_estimate:{type:'string'},range_minutes:{type:'number'},interval_minutes:{type:'number'}},required:['birth_time_estimate']}},
   {name:'btr_consensus_analyzer',description:'세 AI 루브릭 점수 종합.',inputSchema:{type:'object',properties:{gem_analysis:{type:'string'},cl_analysis:{type:'string'},gpt_analysis:{type:'string'},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'}},required:['gem_analysis','cl_analysis','gpt_analysis','gem_score','cl_score','gpt_score']}},
   {name:'btr_conflict_axis_finder',description:'세 AI 갈등 축 식별.',inputSchema:{type:'object',properties:{analyses:{type:'array',items:{type:'string'}},scores:{type:'array',items:{type:'number'}}},required:['analyses','scores']}},
@@ -259,15 +247,11 @@ const ALL_TOOLS = [
   {name:'btr_finalize_confirmed',description:'★ S-Class Hard Stop 완료 처리.',inputSchema:{type:'object',properties:{session_id:{type:'string'},structure_code:{type:'string'},confirmed_birth_time:{type:'string'},final_score:{type:'number'},analysis_doc_url:{type:'string'},gem_score:{type:'number'},cl_score:{type:'number'},gpt_score:{type:'number'}},required:['session_id','structure_code','confirmed_birth_time','final_score']}},
   {name:'btr_finalize_held',description:'★ Held 상태 완료 처리.',inputSchema:{type:'object',properties:{session_id:{type:'string'},structure_code:{type:'string'},failure_summary:{type:'string'},highest_score:{type:'number'},best_candidate_time:{type:'string'}},required:['session_id','structure_code','failure_summary']}},
   {name:'init_btr_sheets',description:'★ Archive SS에 BTRRuntime·BTRNotifications 시트 생성 및 헤더 작성.',inputSchema:{type:'object',properties:{spreadsheet_id:{type:'string'},force_recreate:{type:'boolean'}},required:[]}},
-
-  // ── L1: VIDEO AUTOMATION (v5.11) ──
-  {name:'video_init_sheets',description:'★ 영상 자동화 전용 스프레드시트 생성+초기화. create_new:true 시 SA가 새 SS 생성→victuar918@gmail.com 편집권한 공유. 8개 시트 생성: VIDEO_SCRIPT(A-R 18컬럼)/CRYPTO_BIRTH_CHARTS/SOURCE_FILES/PROMO_SOURCES/EFFECTS_CATALOG(전체효과프리셋)/VOICE_CONFIG/SECTION_PRESETS/VIDEO_META_TEMPLATE',inputSchema:{type:'object',properties:{create_new:{type:'boolean',description:'true: SA가 새 SS 생성 후 owner_email에 공유 (권장)'},title:{type:'string',description:'새 SS 제목 (기본: ASTERION Video Automation)'},owner_email:{type:'string',description:'공유할 이메일 (기본: victuar918@gmail.com)'},spreadsheet_id:{type:'string',description:'기존 SS ID (create_new:false 시 사용)'}},required:[]}},
-  {name:'video_create_script',description:'★ 영상 1편 대본 시트 생성 (VS_{coin}_{date}). Video_Meta + Script_Data A-R 18컬럼 일괄 기록.',inputSchema:{type:'object',properties:{coin:{type:'string'},date:{type:'string'},video_meta:{type:'object',description:'youtube_title, top_watermark, thumbnail_text, main_bgm'},script_rows:{type:'array',items:{type:'object'},description:'A-R 18컬럼: Section/Speaker/Card_Main/Card_Sub/Card_Desc/Highlight_Word/Script/BG_File/Animation/Card_Style/Status/Note/BG_Effect/BG_Transition/Card_ExtraEffect/Lottie_File/Sticker_File/Gradient_Preset'},spreadsheet_id:{type:'string'}},required:['coin','script_rows']}},
-  {name:'video_read_script',description:'영상 대본 시트 읽기. video_meta + script_rows(A-R 18컬럼) JSON 반환.',inputSchema:{type:'object',properties:{sheet_name:{type:'string'},spreadsheet_id:{type:'string'}},required:['sheet_name']}},
-  {name:'video_update_row_status',description:'Script_Data 행 Status(K열) 업데이트 (READY→DONE/ERROR).',inputSchema:{type:'object',properties:{sheet_name:{type:'string'},row_index:{type:'number'},status:{type:'string',enum:['READY','DONE','ERROR']},spreadsheet_id:{type:'string'}},required:['sheet_name','row_index','status']}},
+  {name:'video_init_sheets',description:'★ 영상 자동화 전용 SS 생성+초기화. create_new:true 시 SA가 새 SS 생성→victuar918@gmail.com 편집권한 공유. 8개 시트: VIDEO_SCRIPT(A-R)/CRYPTO_BIRTH_CHARTS/SOURCE_FILES/PROMO_SOURCES/EFFECTS_CATALOG/VOICE_CONFIG/SECTION_PRESETS/VIDEO_META_TEMPLATE',inputSchema:{type:'object',properties:{create_new:{type:'boolean'},title:{type:'string'},owner_email:{type:'string'},spreadsheet_id:{type:'string'}},required:[]}},
+  {name:'video_create_script',description:'★ 영상 1편 대본 시트 생성 (VS_{coin}_{date}). Video_Meta + Script_Data A-R 18컬럼.',inputSchema:{type:'object',properties:{coin:{type:'string'},date:{type:'string'},video_meta:{type:'object'},script_rows:{type:'array',items:{type:'object'}},spreadsheet_id:{type:'string'}},required:['coin','script_rows']}},
+  {name:'video_read_script',description:'영상 대본 시트 읽기. video_meta + script_rows(A-R) JSON 반환.',inputSchema:{type:'object',properties:{sheet_name:{type:'string'},spreadsheet_id:{type:'string'}},required:['sheet_name']}},
+  {name:'video_update_row_status',description:'Script_Data 행 Status(K열) 업데이트.',inputSchema:{type:'object',properties:{sheet_name:{type:'string'},row_index:{type:'number'},status:{type:'string',enum:['READY','DONE','ERROR']},spreadsheet_id:{type:'string'}},required:['sheet_name','row_index','status']}},
   {name:'video_delete_script',description:'★ YouTube 업로드 완료 후 대본 시트 삭제.',inputSchema:{type:'object',properties:{sheet_name:{type:'string'},spreadsheet_id:{type:'string'}},required:['sheet_name']}},
-
-  // ── L2: GCloud ──
   {name:'gcloud_submit',description:'Cloud Build로 gcloud 실행.',inputSchema:{type:'object',properties:{commands:{type:'array',items:{type:'string'}},project:{type:'string'}},required:['commands']}},
   {name:'cloudbuild_status',description:'Cloud Build 빌드 상태.',inputSchema:{type:'object',properties:{buildId:{type:'string'},project:{type:'string'}},required:['buildId']}},
   {name:'cloudrun_services',description:'Cloud Run 서비스 목록.',inputSchema:{type:'object',properties:{project:{type:'string'},region:{type:'string'}},required:[]}},
@@ -275,8 +259,6 @@ const ALL_TOOLS = [
   {name:'cloudrun_set_env',description:'Cloud Run 환경변수 설정.',inputSchema:{type:'object',properties:{service:{type:'string'},envVars:{type:'object'},project:{type:'string'},region:{type:'string'}},required:['service','envVars']}},
   {name:'agent_registry_list',description:'★ Agent Registry 서비스 목록 직접 조회.',inputSchema:{type:'object',properties:{location:{type:'string'},project:{type:'string'}},required:[]}},
   {name:'agent_registry_register',description:'★ Agent Registry에 MCP 서버 직접 등록.',inputSchema:{type:'object',properties:{display_name:{type:'string'},endpoint_url:{type:'string'},location:{type:'string'},service_id:{type:'string'},project:{type:'string'}},required:[]}},
-
-  // ── L3: SystemOps ──
   {name:'github_read_file',description:'GitHub 파일 읽기.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo','path']}},
   {name:'github_write_file',description:'★ GitHub 파일 쓰기 → 자동배포.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},content:{type:'string'},message:{type:'string'},branch:{type:'string'}},required:['repo','path','content','message']}},
   {name:'github_list_files',description:'GitHub 파일 목록.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},branch:{type:'string'}},required:['repo']}},
@@ -286,8 +268,6 @@ const ALL_TOOLS = [
   {name:'http_request',description:'임의 HTTP 요청.',inputSchema:{type:'object',properties:{url:{type:'string'},method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE']},body:{type:'object'},headers:{type:'object'}},required:['url']}},
   {name:'get_system_status',description:'ASTERION 전체 시스템 상태.',inputSchema:{type:'object',properties:{},required:[]}},
   {name:'append_sheet_row',description:'Google Sheets 행 추가.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'string'}}},required:['spreadsheetId','range','values']}},
-
-  // ── L4: Workspace ──
   {name:'read_google_doc',description:'Google Docs 텍스트 추출.',inputSchema:{type:'object',properties:{document_id:{type:'string'}},required:['document_id']}},
   {name:'create_google_doc',description:'Google Docs 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},content:{type:'string'},folder_id:{type:'string'}},required:['title']}},
   {name:'create_spreadsheet',description:'Google Sheets 생성.',inputSchema:{type:'object',properties:{title:{type:'string'},sheet_name:{type:'string'},folder_id:{type:'string'}},required:['title']}},
@@ -305,13 +285,9 @@ const ALL_TOOLS = [
   {name:'list_run_revisions',description:'Cloud Run 리비전 목록.',inputSchema:{type:'object',properties:{service_name:{type:'string'},project:{type:'string'},region:{type:'string'}},required:[]}},
   {name:'delete_run_revision',description:'Cloud Run 리비전 삭제.',inputSchema:{type:'object',properties:{revision_name:{type:'string'},project:{type:'string'},region:{type:'string'}},required:['revision_name']}},
   {name:'create_btr_report_doc',description:'BTR 보고서 Google Docs 생성.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},analysis_content:{type:'string'},folder_id:{type:'string'}},required:['structure_code','analysis_content','folder_id']}},
-
-  // ── L5: AI ──
-  {name:'call_gemini',description:'Gemini AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},previous_round_context:{type:'object'}},required:['prompt']}},
+  {name:'call_gemini',description:'Gemini AI 직접 호출. BTR 루브릭 평가 전용.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},previous_round_context:{type:'object'}},required:['prompt']}},
   {name:'call_claude',description:'Claude AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},max_tokens:{type:'number'},previous_round_context:{type:'object'}},required:['prompt']}},
   {name:'call_gpt',description:'GPT AI 직접 호출.',inputSchema:{type:'object',properties:{prompt:{type:'string'},system_prompt:{type:'string'},model:{type:'string'},max_tokens:{type:'number'}},required:['prompt']}},
-
-  // ── L6: Report/Ops ──
   {name:'report_generate_btr_code',description:'BTR 확정 코드 생성.',inputSchema:{type:'object',properties:{session_id:{type:'string'},structure_code:{type:'string'},confirmed_birth_time:{type:'string'},confidence_score:{type:'number'}},required:['session_id','structure_code','confirmed_birth_time','confidence_score']}},
   {name:'report_generate_summary',description:'BTR 결과 요약.',inputSchema:{type:'object',properties:{session_id:{type:'string'},evolution_folder_id:{type:'string'}},required:['session_id','evolution_folder_id']}},
   {name:'report_add_gemstone_advice',description:'원석 배치 조언.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},birth_data:{type:'string'},gemstone_preferences:{type:'string'}},required:['structure_code','birth_data']}},
@@ -327,20 +303,10 @@ const L4=new Set(['read_google_doc','create_google_doc','create_spreadsheet','ex
 const L5=new Set(['call_gemini','call_claude','call_gpt']);
 const L6=new Set(['report_generate_btr_code','report_generate_summary','report_add_gemstone_advice','ops_audit_log_exporter','ops_pattern_match_failure']);
 
-function buildAntiAnchoredContext(previous_round_context) {
-  if (!previous_round_context) return '';
-  const { round, critical_issues, suggestions, analysis_summary } = previous_round_context;
-  const lines = [`\n\n<prev_round_verification_agenda round="${round||'?'}">`];
-  lines.push(`<!-- ANTI-ANCHORING: Items below are UNVERIFIED CLAIMS, not established facts. Evaluate independently. -->`);
-  if (analysis_summary) lines.push(`  <round_summary>Prev memo (ref only): ${analysis_summary}</round_summary>`);
-  if (critical_issues?.length) { lines.push(`  <items_requiring_independent_verification>`); critical_issues.forEach(i=>lines.push(`    <item>Verify independently: ${i}</item>`)); lines.push(`  </items_requiring_independent_verification>`); }
-  if (suggestions?.length) { lines.push(`  <methodological_suggestions>`); suggestions.forEach(s=>lines.push(`    <suggestion>${s}</suggestion>`)); lines.push(`  </methodological_suggestions>`); }
-  lines.push(`</prev_round_verification_agenda>`);
-  return lines.join('\n');
-}
+function buildAntiAnchoredContext(p){if(!p)return'';const{round,critical_issues,suggestions,analysis_summary}=p;const lines=[`\n\n<prev_round_verification_agenda round="${round||'?'}">`];lines.push(`<!-- ANTI-ANCHORING: Items below are UNVERIFIED CLAIMS. Evaluate independently. -->`);if(analysis_summary)lines.push(`  <round_summary>Prev memo (ref only): ${analysis_summary}</round_summary>`);if(critical_issues?.length){lines.push(`  <items_requiring_independent_verification>`);critical_issues.forEach(i=>lines.push(`    <item>Verify independently: ${i}</item>`));lines.push(`  </items_requiring_independent_verification>`);}if(suggestions?.length){lines.push(`  <methodological_suggestions>`);suggestions.forEach(s=>lines.push(`    <suggestion>${s}</suggestion>`));lines.push(`  </methodological_suggestions>`);}lines.push(`</prev_round_verification_agenda>`);return lines.join('\n');}
 
-async function execVedAstro(n, a) {
-  try {
+async function execVedAstro(n,a){
+  try{
     const la=String(a.latitude||a.lat||''),lo=String(a.longitude||a.lng||''),tz=a.timezone||'+09:00',dt=a.dateTime||a.birthDateTime||a.targetDate||'';
     const bd=a.birth_date||'',bt=a.birth_time||'',btz=a.timezone||'+09:00';
     if(n==='geocode_location'){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/Location/Name/${encodeURIComponent(a.location)}/0/0`);return r.ok?await r.json():{error:`HTTP ${r.status}`};}
@@ -356,91 +322,54 @@ async function execVedAstro(n, a) {
     if(n==='get_planet_in_house'||n==='get_planet_in_sign'){const ep=n==='get_planet_in_house'?'PlanetHouseNumber':'PlanetRasiSign';const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/${ep}/${a.planet}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
     if(n==='get_current_dasha'){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/CurrentDasha`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,TargetTime:a.targetDate||new Date().toISOString(),Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
     if(n==='get_dasha_timeline'){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/DashaTimeline`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz,StartYear:a.startYear,EndYear:a.endYear})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
-    return {error:`미구현: ${n}`};
-  } catch(e){return{error:`${n}: ${e.message}`};}
+    return{error:`미구현: ${n}`};
+  }catch(e){return{error:`${n}: ${e.message}`};}
 }
 
 async function execBTR(n,a){
   const tok=await getGoogleToken();
   if(!tok&&!['btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','validate_sclass_gate','video_init_sheets','video_create_script','video_read_script','video_update_row_status','video_delete_script'].includes(n))return{error:'Google 인증 실패'};
 
-  // ══ VIDEO AUTOMATION v5.11 ══
   if(n==='video_init_sheets'){
     const gTok=await getGCPToken();
     if(!gTok)return{error:'GCP ADC 인증 실패'};
     let ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
     const result={created:[],headers_written:{},spreadsheet_id:ssId};
-
-    // ★ 새 스프레드시트 생성 (SA 소유 → 유저에게 편집 공유)
     if(a.create_new){
       const title=a.title||'ASTERION Video Automation';
-      const createR=await fetchWithTimeout('https://sheets.googleapis.com/v4/spreadsheets',{
-        method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},
-        body:JSON.stringify({properties:{title}})
-      },15000);
+      const createR=await fetchWithTimeout('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({properties:{title}})},15000);
       if(!createR.ok)return{error:`SS 생성 실패 ${createR.status}: ${await createR.text()}`};
       const newSS=await createR.json();
-      ssId=newSS.spreadsheetId;
-      result.spreadsheet_id=ssId;
-      result.is_new_spreadsheet=true;
-      result.title=title;
-      // 유저에게 편집 권한 공유
+      ssId=newSS.spreadsheetId;result.spreadsheet_id=ssId;result.is_new_spreadsheet=true;result.title=title;
       const ownerEmail=a.owner_email||VIDEO_OWNER_EMAIL;
-      const shareR=await fetchWithTimeout(`https://www.googleapis.com/drive/v3/files/${ssId}/permissions`,{
-        method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},
-        body:JSON.stringify({type:'user',role:'writer',emailAddress:ownerEmail})
-      },10000).catch(e=>({ok:false,message:e.message}));
-      result.shared_with=ownerEmail;
-      result.share_ok=!!(shareR?.ok);
+      const shareR=await fetchWithTimeout(`https://www.googleapis.com/drive/v3/files/${ssId}/permissions`,{method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({type:'user',role:'writer',emailAddress:ownerEmail})},10000).catch(e=>({ok:false,message:e.message}));
+      result.shared_with=ownerEmail;result.share_ok=!!(shareR?.ok);
     }
-
-    // 현재 시트 목록
     const ssInfo=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties.title`,{headers:{Authorization:`Bearer ${gTok}`}},10000);
     if(!ssInfo.ok)return{error:`SS 접근 실패 ${ssInfo.status}`};
     const existing=((await ssInfo.json()).sheets||[]).map(s=>s.properties.title);
     result.existing_sheets=existing;
-
-    // 8개 시트 생성
     const ALL_VIDEO_SHEETS=['VIDEO_SCRIPT','CRYPTO_BIRTH_CHARTS','SOURCE_FILES','PROMO_SOURCES','EFFECTS_CATALOG','VOICE_CONFIG','SECTION_PRESETS','VIDEO_META_TEMPLATE'];
     const toCreate=ALL_VIDEO_SHEETS.filter(s=>!existing.includes(s)).map(title=>({addSheet:{properties:{title}}}));
     if(toCreate.length>0){
-      const cr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{
-        method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},
-        body:JSON.stringify({requests:toCreate})
-      },15000);
+      const cr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:toCreate})},15000);
       if(!cr.ok)return{error:`시트 생성 실패 ${cr.status}: ${await cr.text()}`};
       result.created=toCreate.map(r=>r.addSheet.properties.title);
     }
-
-    // 헤더 + 데이터 일괄 작성
     const WRITES=[
-      {sheet:'VIDEO_SCRIPT',rows:[
-        ['Section','Speaker','Card_Main','Card_Sub','Card_Desc','Highlight_Word','Script','BG_File','Animation','Card_Style','Status','Note','BG_Effect','BG_Transition','Card_ExtraEffect','Lottie_File','Sticker_File','Gradient_Preset']
-      ]},
-      {sheet:'CRYPTO_BIRTH_CHARTS',rows:[
-        ['Symbol','Name','Network_Start','Location','Lagna','Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Current_Dasha','Dasha_End','Notes']
-      ]},
-      {sheet:'SOURCE_FILES',rows:[
-        ['Type','Filename','Duration_Sec','Category','Tags','Notes','Last_Sync']
-      ]},
-      {sheet:'PROMO_SOURCES',rows:[
-        ['Type','Filename','Duration_Sec','Category','Tags','Notes','Last_Sync']
-      ]},
+      {sheet:'VIDEO_SCRIPT',rows:[['Section','Speaker','Card_Main','Card_Sub','Card_Desc','Highlight_Word','Script','BG_File','Animation','Card_Style','Status','Note','BG_Effect','BG_Transition','Card_ExtraEffect','Lottie_File','Sticker_File','Gradient_Preset']]},
+      {sheet:'CRYPTO_BIRTH_CHARTS',rows:[['Symbol','Name','Network_Start','Location','Lagna','Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Current_Dasha','Dasha_End','Notes']]},
+      {sheet:'SOURCE_FILES',rows:[['Type','Filename','Duration_Sec','Category','Tags','Notes','Last_Sync']]},
+      {sheet:'PROMO_SOURCES',rows:[['Type','Filename','Duration_Sec','Category','Tags','Notes','Last_Sync']]},
       {sheet:'EFFECTS_CATALOG',rows:EFFECTS_CATALOG_DATA},
       {sheet:'VOICE_CONFIG',rows:VOICE_CONFIG_DATA},
       {sheet:'SECTION_PRESETS',rows:SECTION_PRESETS_DATA},
       {sheet:'VIDEO_META_TEMPLATE',rows:VIDEO_META_TEMPLATE_DATA},
     ];
-
     for(const w of WRITES){
-      const r=await fetchWithTimeout(
-        `https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(w.sheet+'!A1')}?valueInputOption=USER_ENTERED`,
-        {method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:w.rows})},
-        20000
-      );
+      const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(w.sheet+'!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:w.rows})},20000);
       result.headers_written[w.sheet]=r.ok?`✅ ${w.rows.length}행`:`❌ ${r.status}`;
     }
-
     result.success=Object.values(result.headers_written).every(v=>v.startsWith('✅'));
     result.url=`https://docs.google.com/spreadsheets/d/${ssId}`;
     result.total_sheets=ALL_VIDEO_SHEETS.length;
@@ -448,16 +377,13 @@ async function execBTR(n,a){
     return result;
   }
 
-  // ★ video_create_script — A-R 18컬럼
   if(n==='video_create_script'){
-    const gTok=await getGCPToken();
-    if(!gTok)return{error:'GCP ADC 인증 실패'};
+    const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
     const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
     const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
     const sheetName=`VS_${a.coin}_${a.date||today}`;
     const cr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:[{addSheet:{properties:{title:sheetName}}}]})},15000);
     if(!cr.ok){const et=await cr.text();if(!et.includes('already exists')&&!et.includes('A sheet with the name'))return{error:`시트 생성 실패 ${cr.status}`};}
-    // Video_Meta (5행) + 구분줄 + 헤더 + 대본 (A-R 18컬럼)
     const metaRows=[
       ['[VIDEO_META]','YouTube_Title',a.video_meta?.youtube_title||''],
       ['','Top_Watermark',a.video_meta?.top_watermark||''],
@@ -465,54 +391,29 @@ async function execBTR(n,a){
       ['','Main_BGM',a.video_meta?.main_bgm||''],
       [''],
       ['Section','Speaker','Card_Main','Card_Sub','Card_Desc','Highlight_Word','Script','BG_File','Animation','Card_Style','Status','Note','BG_Effect','BG_Transition','Card_ExtraEffect','Lottie_File','Sticker_File','Gradient_Preset'],
-      ...(a.script_rows||[]).map(r=>[
-        r.Section||'',
-        String(r.Speaker||'1'),
-        r.Card_Main||'',
-        r.Card_Sub||'',
-        r.Card_Desc||'',
-        r.Highlight_Word||'',
-        r.Script||'',
-        r.BG_File||'',
-        r.Animation||'A',
-        r.Card_Style||'DEFAULT',
-        'READY',
-        r.Note||'',
-        r.BG_Effect||'NONE',
-        r.BG_Transition||'FADE',
-        r.Card_ExtraEffect||'NONE',
-        r.Lottie_File||'NONE',
-        r.Sticker_File||'NONE',
-        r.Gradient_Preset||'DEFAULT',
-      ])
+      ...(a.script_rows||[]).map(r=>[r.Section||'',String(r.Speaker||'1'),r.Card_Main||'',r.Card_Sub||'',r.Card_Desc||'',r.Highlight_Word||'',r.Script||'',r.BG_File||'',r.Animation||'A',r.Card_Style||'DEFAULT','READY',r.Note||'',r.BG_Effect||'NONE',r.BG_Transition||'FADE',r.Card_ExtraEffect||'NONE',r.Lottie_File||'NONE',r.Sticker_File||'NONE',r.Gradient_Preset||'DEFAULT'])
     ];
     const wr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(sheetName+'!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:metaRows})},15000);
     return{success:wr.ok,sheet_name:sheetName,total_rows:metaRows.length,script_rows:a.script_rows?.length||0,columns:'A-R (18컬럼)',url:`https://docs.google.com/spreadsheets/d/${ssId}`};
   }
 
-  // ★ video_read_script — A-R 18컬럼 파싱
   if(n==='video_read_script'){
-    const gTok=await getGCPToken();
-    if(!gTok)return{error:'GCP ADC 인증 실패'};
+    const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
     const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
     const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(a.sheet_name)}`,{headers:{Authorization:`Bearer ${gTok}`}},10000);
     if(!r.ok)return{error:`읽기 실패 ${r.status}`};
     const rows=((await r.json()).values)||[];
-    const meta={};
-    let scriptStart=-1;
-    for(let i=0;i<rows.length;i++){
-      if(rows[i][0]==='Section'){scriptStart=i+1;break;}
-      if(rows[i][1]&&rows[i][0]!=='[VIDEO_META]')meta[rows[i][1]]=rows[i][2]||'';
-    }
+    const meta={};let scriptStart=-1;
+    for(let i=0;i<rows.length;i++){if(rows[i][0]==='Section'){scriptStart=i+1;break;}if(rows[i][1]&&rows[i][0]!=='[VIDEO_META]')meta[rows[i][1]]=rows[i][2]||'';}
     const hdr=['Section','Speaker','Card_Main','Card_Sub','Card_Desc','Highlight_Word','Script','BG_File','Animation','Card_Style','Status','Note','BG_Effect','BG_Transition','Card_ExtraEffect','Lottie_File','Sticker_File','Gradient_Preset'];
     const scriptRows=scriptStart>=0?rows.slice(scriptStart).map(r=>Object.fromEntries(hdr.map((k,i)=>[k,r[i]||'']))).filter(r=>r.Section):[];
-    return{sheet_name:a.sheet_name,video_meta:meta,script_rows:scriptRows,total_script_rows:scriptRows.length,columns:'A-R (18컬럼)'};
+    return{sheet_name:a.sheet_name,video_meta:meta,script_rows:scriptRows,total_script_rows:scriptRows.length};
   }
 
   if(n==='video_update_row_status'){
     const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
     const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
-    const sheetRow=a.row_index+7; // Video_Meta 5행 + 헤더 1행 + 1-indexed
+    const sheetRow=a.row_index+7;
     const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(a.sheet_name+'!K'+sheetRow)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[[a.status||'DONE']]})},10000);
     return{success:r.ok,sheet_name:a.sheet_name,row_index:a.row_index,sheet_row:sheetRow,status:a.status};
   }
@@ -528,25 +429,21 @@ async function execBTR(n,a){
     return{success:dr.ok,deleted:a.sheet_name};
   }
 
-  // ★ init_btr_sheets
   if(n==='init_btr_sheets'){
-    const ssId = a.spreadsheet_id || ARCHIVE_SS_ID;
-    const result = { spreadsheet_id: ssId, timestamp: new Date().toISOString() };
-    if(tok) {
-      try { const ui = await fetchWithTimeout('https://www.googleapis.com/oauth2/v2/userinfo', {headers:{Authorization:`Bearer ${tok}`}}, 8000); if(ui.ok) { const ud=await ui.json(); result.oauth_email=ud.email; result.oauth_name=ud.name; } } catch(e) { result.oauth_email_error=e.message; }
-      try { const ti = await fetchWithTimeout(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${tok}`, {}, 5000); if(ti.ok) { const td=await ti.json(); result.oauth_scopes=td.scope?.split(' ')||[]; result.has_spreadsheets_scope=result.oauth_scopes.some(s=>s.includes('spreadsheets')); } } catch(e) { result.scope_check_error=e.message; }
-    }
-    if(result.has_spreadsheets_scope === false) { const cid = process.env.GOOGLE_CLIENT_ID || ''; const scopes = encodeURIComponent(['https://www.googleapis.com/auth/drive','https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/documents','https://www.googleapis.com/auth/script.projects','https://www.googleapis.com/auth/cloud-platform'].join(' ')); result.diagnosis = 'MISSING_SPREADSHEETS_SCOPE'; result.action = 'GOOGLE_REFRESH_TOKEN 재발급 필요'; if(cid) result.regenerate_oauth_url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${cid}&redirect_uri=http://localhost:3000&response_type=code&scope=${scopes}&access_type=offline&prompt=consent`; return result; }
-    const ssInfo = await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties.title`, {headers:{Authorization:`Bearer ${tok}`}}, 10000);
-    if(!ssInfo.ok) { result.ss_access_status = ssInfo.status; result.diagnosis = ssInfo.status===403 ? 'SS_PERMISSION_DENIED' : 'SS_ACCESS_ERROR'; result.action = `Archive 스프레드시트(${ssId})를 ${result.oauth_email||'oauth 계정'}에게 편집자(Editor)로 공유하세요`; return result; }
-    const ssData = await ssInfo.json(); const existingSheets = (ssData.sheets||[]).map(s=>s.properties.title); result.existing_sheets = existingSheets;
-    const toCreate = []; if(!existingSheets.includes('BTRRuntime')) toCreate.push({addSheet:{properties:{title:'BTRRuntime'}}}); if(!existingSheets.includes('BTRNotifications')) toCreate.push({addSheet:{properties:{title:'BTRNotifications'}}});
-    if(toCreate.length > 0) { const cr = await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{method:'POST', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify({requests:toCreate})}, 15000); if(!cr.ok) { result.create_sheets_status = cr.status; result.diagnosis = 'CREATE_SHEETS_FAILED'; return result; } result.sheets_created = toCreate.map(r=>r.addSheet.properties.title); } else { result.sheets_existed = ['BTRRuntime','BTRNotifications']; }
-    const rh = await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent('BTRRuntime!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify({values:[['session_id','structure_code','round','sclass_passed','candidate_slots','agreement_score','entropy_score','conflict_axis','next_action','status','created_at','updated_at','evolution_folder_id','heartbeat_time','heartbeat_step','gem_score','cl_score','gpt_score','critical_issues','suggestions','analysis_summary']]})}, 10000);
-    result.btrruntime_header = rh.ok ? '✅ 21컬럼' : `❌ ${rh.status}`;
-    const nh = await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent('BTRNotifications!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify({values:[['id','session_id','type','title','content','status','created_at']]})}, 10000);
-    result.btrnotifications_header = nh.ok ? '✅ 7컬럼' : `❌ ${nh.status}`;
-    result.success = rh.ok && nh.ok; result.diagnosis = result.success ? 'ALL_OK' : 'PARTIAL'; return result;
+    const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    const result={spreadsheet_id:ssId,timestamp:new Date().toISOString()};
+    if(tok){try{const ui=await fetchWithTimeout('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:`Bearer ${tok}`}},8000);if(ui.ok){const ud=await ui.json();result.oauth_email=ud.email;result.oauth_name=ud.name;}}catch(e){result.oauth_email_error=e.message;}try{const ti=await fetchWithTimeout(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${tok}`,{},5000);if(ti.ok){const td=await ti.json();result.oauth_scopes=td.scope?.split(' ')||[];result.has_spreadsheets_scope=result.oauth_scopes.some(s=>s.includes('spreadsheets'));}}catch(e){result.scope_check_error=e.message;}}
+    if(result.has_spreadsheets_scope===false){const cid=process.env.GOOGLE_CLIENT_ID||'';const scopes=encodeURIComponent(['https://www.googleapis.com/auth/drive','https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/documents','https://www.googleapis.com/auth/script.projects','https://www.googleapis.com/auth/cloud-platform'].join(' '));result.diagnosis='MISSING_SPREADSHEETS_SCOPE';result.action='GOOGLE_REFRESH_TOKEN 재발급 필요';if(cid)result.regenerate_oauth_url=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${cid}&redirect_uri=http://localhost:3000&response_type=code&scope=${scopes}&access_type=offline&prompt=consent`;return result;}
+    const ssInfo=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties.title`,{headers:{Authorization:`Bearer ${tok}`}},10000);
+    if(!ssInfo.ok){result.ss_access_status=ssInfo.status;result.diagnosis=ssInfo.status===403?'SS_PERMISSION_DENIED':'SS_ACCESS_ERROR';result.action=`Archive SS를 ${result.oauth_email||'oauth 계정'}에게 편집자로 공유하세요`;return result;}
+    const ssData=await ssInfo.json();const existingSheets=(ssData.sheets||[]).map(s=>s.properties.title);result.existing_sheets=existingSheets;
+    const toCreate=[];if(!existingSheets.includes('BTRRuntime'))toCreate.push({addSheet:{properties:{title:'BTRRuntime'}}});if(!existingSheets.includes('BTRNotifications'))toCreate.push({addSheet:{properties:{title:'BTRNotifications'}}});
+    if(toCreate.length>0){const cr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:toCreate})},15000);if(!cr.ok){result.create_sheets_status=cr.status;result.diagnosis='CREATE_SHEETS_FAILED';return result;}result.sheets_created=toCreate.map(r=>r.addSheet.properties.title);}else{result.sheets_existed=['BTRRuntime','BTRNotifications'];}
+    const rh=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent('BTRRuntime!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[['session_id','structure_code','round','sclass_passed','candidate_slots','agreement_score','entropy_score','conflict_axis','next_action','status','created_at','updated_at','evolution_folder_id','heartbeat_time','heartbeat_step','gem_score','cl_score','gpt_score','critical_issues','suggestions','analysis_summary']]})},10000);
+    result.btrruntime_header=rh.ok?'✅ 21컬럼':`❌ ${rh.status}`;
+    const nh=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent('BTRNotifications!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[['id','session_id','type','title','content','status','created_at']]})},10000);
+    result.btrnotifications_header=nh.ok?'✅ 7컬럼':`❌ ${nh.status}`;
+    result.success=rh.ok&&nh.ok;result.diagnosis=result.success?'ALL_OK':'PARTIAL';return result;
   }
 
   if(n==='btr_init_candidate_slots'){const[h,m]=a.birth_time_estimate.split(':').map(Number);const rng=a.range_minutes||120,iv=a.interval_minutes||15,sl=[];for(let o=-rng;o<=rng;o+=iv){const t=h*60+m+o;sl.push(`${Math.floor(((t%1440)+1440)%1440/60).toString().padStart(2,'0')}:${(((t%1440)+1440)%60).toString().padStart(2,'0')}`)}return{candidate_slots:[...new Set(sl)],count:new Set(sl).size};}
@@ -586,7 +483,13 @@ async function execSystem(n,a){
   if(n==='github_write_file'){if(!GITHUB_PAT)return{error:'GITHUB_PAT 미설정'};const{repo,path,content,message,branch='main'}=a;let sha;const ex=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/${path}?ref=${branch}`,{headers:ghH()},15000);if(ex.ok)sha=(await ex.json()).sha;const r=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/${path}`,{method:'PUT',headers:ghH(),body:JSON.stringify({message,content:Buffer.from(content).toString('base64'),branch,...(sha?{sha}:{})})},20000);if(!r.ok)return{error:`GitHub ${r.status}: ${await r.text()}`};const d=await r.json();return{success:true,commit:d.commit?.sha,note:'Cloud Build 자동배포 트리거됨'};}
   if(n==='github_list_files'){if(!GITHUB_PAT)return{error:'GITHUB_PAT 미설정'};const{repo,path='',branch='main'}=a;const r=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/${path}?ref=${branch}`,{headers:ghH()},15000);if(!r.ok)return{error:`GitHub ${r.status}`};const d=await r.json();return{files:(Array.isArray(d)?d:[d]).map(f=>({name:f.name,type:f.type,size:f.size,path:f.path}))};}
   if(n==='gh_push_files'){if(!GITHUB_PAT)return{error:'GITHUB_PAT 미설정'};const{repo,branch='main',message,files}=a;if(!files?.length)return{error:'files 배열 필요'};const h=ghH();const refR=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/git/ref/heads/${branch}`,{headers:h},15000);if(!refR.ok)return{error:`브랜치 조회 실패 ${refR.status}`};const headSha=(await refR.json()).object.sha;const commitR=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/git/commits/${headSha}`,{headers:h},15000);if(!commitR.ok)return{error:`커밋 조회 실패 ${commitR.status}`};const treeSha=(await commitR.json()).tree.sha;const treeItems=files.map(f=>({path:f.path,mode:'100644',type:'blob',content:f.content}));const treeR=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/git/trees`,{method:'POST',headers:h,body:JSON.stringify({base_tree:treeSha,tree:treeItems})},20000);if(!treeR.ok)return{error:`트리 생성 실패 ${treeR.status}`};const newTreeSha=(await treeR.json()).sha;const newCommitR=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/git/commits`,{method:'POST',headers:h,body:JSON.stringify({message,tree:newTreeSha,parents:[headSha]})},15000);if(!newCommitR.ok)return{error:`커밋 생성 실패 ${newCommitR.status}`};const newCommitSha=(await newCommitR.json()).sha;const updateR=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/git/refs/heads/${branch}`,{method:'PATCH',headers:h,body:JSON.stringify({sha:newCommitSha,force:false})},15000);if(!updateR.ok)return{error:`브랜치 업데이트 실패 ${updateR.status}`};return{success:true,commit:newCommitSha,files_count:files.length,files:files.map(f=>f.path)};}
-  if(['sheets_read','sheets_write','append_sheet_row'].includes(n)){const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};if(n==='sheets_read'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Sheets ${r.status}`};const d=await r.json();return{values:d.values||[],range:d.range};}if(n==='sheets_write'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:a.values})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}if(n==='append_sheet_row'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[a.values]})});return r.ok?await r.json():{error:`Sheets ${r.status}`;}}  }
+  // ★ FIX: 세미콜론 제거됨
+  if(['sheets_read','sheets_write','append_sheet_row'].includes(n)){
+    const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};
+    if(n==='sheets_read'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Sheets ${r.status}`};const d=await r.json();return{values:d.values||[],range:d.range};}
+    if(n==='sheets_write'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:a.values})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
+    if(n==='append_sheet_row'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[a.values]})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
+  }
   if(n==='http_request'){const{url,method='GET',body,headers={}}=a;const opts={method,headers:{'Content-Type':'application/json',...headers}};if(body&&method!=='GET')opts.body=JSON.stringify(body);const r=await fetchWithTimeout(url,opts,30000);try{return{status:r.status,ok:r.ok,data:await r.json()};}catch{return{status:r.status,ok:r.ok,data:await r.text()};}}
   if(n==='get_system_status'){const[mcp]=await Promise.allSettled([fetchWithTimeout(`${MCP_URL}/`).then(r=>r.json())]);return{mcp_server:mcp.status==='fulfilled'?{ok:true,server:mcp.value?.server,tools:mcp.value?.totalTools}:{ok:false},github_pat:GITHUB_PAT?'✓':'✗',google_oauth:process.env.GOOGLE_REFRESH_TOKEN?'✓':'✗',gcp_adc:(await getGCPToken())?'✓ ADC 정상':'✗',timestamp:new Date().toISOString()};}
   return{error:`미구현: ${n}`};
@@ -615,8 +518,8 @@ async function execWorkspace(n,a){
 
 async function execAI(n,a){
   const antiAnchoredCtx=buildAntiAnchoredContext(a.previous_round_context);
-  if(n==='call_gemini'){const key=process.env.GEMINI_API_KEY;if(!key)return{error:'GEMINI_API_KEY 미설정'};const model=a.model||'gemini-3.1-pro-preview';const defaultSys=`<role>ASTERION BTR rubric analyst — independent evaluator</role>\n<rubric total="100"><criterion id="event_fit" max="40"/><criterion id="navamsa_d9" max="20"/><criterion id="appearance" max="15"/><criterion id="sandhi" max="15"/><criterion id="consistency" max="10"/></rubric>\n<hard_stop>all_scores≥97 AND critical_issues=[] → S-Class CONFIRMED</hard_stop>\n<anti_anchoring_rule>Evaluate INDEPENDENTLY. previous_round_context = verification agenda ONLY.</anti_anchoring_rule>\n<output_format>{"candidate_time":"HH:MM","analysis":"string","scores":{"event_fit":0,"navamsa_d9":0,"appearance":0,"sandhi":0,"consistency":0},"total":0,"critical_issues":[],"suggestions":[],"confidence":"LOW|MEDIUM|HIGH"}</output_format>\n<lang>Respond in Korean</lang>`;const sys=(a.system_prompt||defaultSys)+antiAnchoredCtx;const r=await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:a.prompt}]}],thinkingConfig:{thinkingLevel:'high'},generationConfig:{maxOutputTokens:8192,temperature:0.7}})},60000);if(!r.ok)throw new Error(`Gemini ${r.status}: ${(await r.text()).slice(0,200)}`);const d=await r.json();return{text:d.candidates?.[0]?.content?.parts?.[0]?.text||'',model};}
-  if(n==='call_claude'){const key=process.env.ANTHROPIC_API_KEY;if(!key)return{error:'ANTHROPIC_API_KEY 미설정'};const model=a.model||'claude-sonnet-4-6';const defaultSys=`<role>ASTERION BTR rubric analyst — independent evaluator</role>\n<anti_anchoring_rule>Evaluate INDEPENDENTLY.</anti_anchoring_rule>\n<output_format>{"candidate_time":"HH:MM","analysis":"string","scores":{"event_fit":0,"navamsa_d9":0,"appearance":0,"sandhi":0,"consistency":0},"total":0,"critical_issues":[],"suggestions":[]}</output_format>\n<lang>Respond in Korean</lang>`;const sys=(a.system_prompt||defaultSys)+antiAnchoredCtx;const r=await fetchWithTimeout('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},body:JSON.stringify({model,max_tokens:a.max_tokens||8000,system:sys,thinking:{type:'enabled',budget_tokens:5000},messages:[{role:'user',content:a.prompt}]})},60000);if(!r.ok)throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0,200)}`);const d=await r.json();return{text:d.content?.find(b=>b.type==='text')?.text||'',model};}
+  if(n==='call_gemini'){const key=process.env.GEMINI_API_KEY;if(!key)return{error:'GEMINI_API_KEY 미설정'};const model=a.model||'gemini-3.1-pro-preview';const defaultSys=`<role>ASTERION BTR rubric analyst</role>\n<rubric total="100"><criterion id="event_fit" max="40"/><criterion id="navamsa_d9" max="20"/><criterion id="appearance" max="15"/><criterion id="sandhi" max="15"/><criterion id="consistency" max="10"/></rubric>\n<hard_stop>all_scores≥97 AND critical_issues=[] → S-Class CONFIRMED</hard_stop>\n<anti_anchoring_rule>Evaluate INDEPENDENTLY.</anti_anchoring_rule>\n<output_format>{"candidate_time":"HH:MM","analysis":"string","scores":{"event_fit":0,"navamsa_d9":0,"appearance":0,"sandhi":0,"consistency":0},"total":0,"critical_issues":[],"suggestions":[],"confidence":"LOW|MEDIUM|HIGH"}</output_format>\n<lang>Respond in Korean</lang>`;const sys=(a.system_prompt||defaultSys)+antiAnchoredCtx;const r=await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:a.prompt}]}],thinkingConfig:{thinkingLevel:'high'},generationConfig:{maxOutputTokens:8192,temperature:0.7}})},60000);if(!r.ok)throw new Error(`Gemini ${r.status}: ${(await r.text()).slice(0,200)}`);const d=await r.json();return{text:d.candidates?.[0]?.content?.parts?.[0]?.text||'',model};}
+  if(n==='call_claude'){const key=process.env.ANTHROPIC_API_KEY;if(!key)return{error:'ANTHROPIC_API_KEY 미설정'};const model=a.model||'claude-sonnet-4-6';const defaultSys=`<role>ASTERION BTR rubric analyst</role>\n<anti_anchoring_rule>Evaluate INDEPENDENTLY.</anti_anchoring_rule>\n<output_format>{"candidate_time":"HH:MM","analysis":"string","scores":{"event_fit":0,"navamsa_d9":0,"appearance":0,"sandhi":0,"consistency":0},"total":0,"critical_issues":[],"suggestions":[]}</output_format>\n<lang>Respond in Korean</lang>`;const sys=(a.system_prompt||defaultSys)+antiAnchoredCtx;const r=await fetchWithTimeout('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},body:JSON.stringify({model,max_tokens:a.max_tokens||8000,system:sys,thinking:{type:'enabled',budget_tokens:5000},messages:[{role:'user',content:a.prompt}]})},60000);if(!r.ok)throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0,200)}`);const d=await r.json();return{text:d.content?.find(b=>b.type==='text')?.text||'',model};}
   if(n==='call_gpt'){const key=process.env.OPENAI_API_KEY;if(!key)return{error:'OPENAI_API_KEY 미설정'};const model=a.model||'gpt-4o';const r=await fetchWithTimeout('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model,max_tokens:a.max_tokens||8000,messages:[{role:'system',content:a.system_prompt||'베다 점성술 BTR 전문가.'},{role:'user',content:a.prompt}]})},60000);if(!r.ok)throw new Error(`GPT ${r.status}: ${(await r.text()).slice(0,200)}`);const d=await r.json();return{text:d.choices?.[0]?.message?.content||'',model};}
   return{error:`미구현: ${n}`};
 }
@@ -655,7 +558,7 @@ app.post('/message',requireMcpAuth,async(req,res)=>{
   const sseRes=sessions.get(req.query.sessionId);if(!sseRes)return res.status(404).json({error:'세션 없음'});
   const{id,method,params}=req.body||{},send=d=>sseRes.write(`data: ${JSON.stringify(d)}\n\n`);
   try{
-    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.0'}}});
+    if(method==='initialize')send({jsonrpc:'2.0',id,result:{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.1'}}});
     else if(method==='tools/list')send({jsonrpc:'2.0',id,result:{tools:toolList}});
     else if(method==='tools/call'){const r=await executeTool(params?.name,params?.arguments||{});send({jsonrpc:'2.0',id,result:{content:[{type:'text',text:JSON.stringify(r,null,2)}]}});}
     else if(method==='ping')send({jsonrpc:'2.0',id,result:{}});
@@ -670,9 +573,9 @@ app.all('/mcp',requireMcpAuth,async(req,res)=>{
   const params=body?.params;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.0'}});
+    if(req.method==='GET')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.1'}});
     if(!body)return err(-32700,'Parse error');
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.1'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(params?.name,params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -684,7 +587,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   const body=req.body,id=body?.id??null,method=body?.method;
   const ok=r=>res.json({jsonrpc:'2.0',id,result:r}),err=(c,m)=>res.json({jsonrpc:'2.0',id,error:{code:c,message:m}});
   try{
-    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.0'}});
+    if(method==='initialize')return ok({protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ASTERION AI Evolution Engine',version:'5.11.1'}});
     if(method==='notifications/initialized')return res.status(200).json({jsonrpc:'2.0'});
     if(method==='tools/list')return ok({tools:toolList});
     if(method==='tools/call'){const r=await executeTool(body?.params?.name,body?.params?.arguments||{});return ok({content:[{type:'text',text:JSON.stringify(r,null,2)}]});}
@@ -693,12 +596,12 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
 app.get('/',(_req,res)=>res.json({
-  status:'running',server:'ASTERION AI Evolution Engine v5.11',
+  status:'running',server:'ASTERION AI Evolution Engine v5.11.1',
   transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
   layers:{L0:`VedAstro(${L0.size})`,L1:`BTR+Video(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
   totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)
 }));
 app.listen(PORT,'0.0.0.0',()=>{
-  console.log(`\n🔱 ASTERION AI Evolution Engine v5.11 | port:${PORT} | tools:${ALL_TOOLS.length}`);
-  console.log(`   v5.11: video_init_sheets 전면개편 — 새 SS 생성(SA→공유) + 8시트 + EFFECTS_CATALOG ${EFFECTS_CATALOG_DATA.length-1}개 효과 프리셋\n`);
+  console.log(`\n🔱 ASTERION AI Evolution Engine v5.11.1 | port:${PORT} | tools:${ALL_TOOLS.length}`);
+  console.log(`   v5.11.1: syntax fix (semicolon removed from append_sheet_row object literal)\n`);
 });
