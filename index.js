@@ -6,7 +6,7 @@
  *              / EFFECTS_CATALOG(전체 효과 프리셋) / VOICE_CONFIG / SECTION_PRESETS / VIDEO_META_TEMPLATE
  *   - video_create_script: A-R 18컬럼 지원
  *   - video_read_script: A-R 18컬럼 파싱
- * v5.11.1: fix syntax error in execSystem append_sheet_row (remove semicolon inside object literal)
+ * v5.12: +github_patch_file +sheets_update_row +docs_patch
  */
 
 import express from 'express';
@@ -293,13 +293,17 @@ const ALL_TOOLS = [
   {name:'report_add_gemstone_advice',description:'원석 배치 조언.',inputSchema:{type:'object',properties:{structure_code:{type:'string'},birth_data:{type:'string'},gemstone_preferences:{type:'string'}},required:['structure_code','birth_data']}},
   {name:'ops_audit_log_exporter',description:'BTR 감사 로그 내보내기.',inputSchema:{type:'object',properties:{session_id:{type:'string'},export_format:{type:'string',enum:['sheets','drive_json']},target_id:{type:'string'}},required:['session_id','export_format']}},
   {name:'ops_pattern_match_failure',description:'BTR 5라운드 실패 패턴 분석.',inputSchema:{type:'object',properties:{session_id:{type:'string'},failed_analyses:{type:'array',items:{type:'string'}},birth_data:{type:'string'}},required:['session_id','failed_analyses','birth_data']}},
+  // ★ v5.12: 부분 업데이트 툴
+  {name:'github_patch_file',description:'★ GitHub 파일 부분 업데이트 — find/replace 패치 배열. 파일 전체 재작성 없이 변경 부분만 지정. 토큰 절약.',inputSchema:{type:'object',properties:{repo:{type:'string'},path:{type:'string'},patches:{type:'array',items:{type:'object',properties:{find:{type:'string'},replace:{type:'string'}},required:['find','replace']}},message:{type:'string'},branch:{type:'string'}},required:['repo','path','patches','message']}},
+  {name:'sheets_update_row',description:'★ Sheets 붐정 행 부분 업데이트 — 키 컬럼으로 행 찾아 지정 컬럼만 수정.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},key_column:{type:'string'},key_value:{type:'string'},updates:{type:'object'}},required:['spreadsheetId','range','key_column','key_value','updates']}},
+  {name:'docs_patch',description:'★ Google Docs 부분 업데이트 — replaceAllText API로 특정 텍스트만 교체.',inputSchema:{type:'object',properties:{document_id:{type:'string'},patches:{type:'array',items:{type:'object',properties:{find:{type:'string'},replace:{type:'string']},required:['find','replace']}}},required:['document_id','patches']}},
 ];
 
 const L0=new Set(['geocode_location','get_timezone','get_planet_positions','get_house_positions','get_navamsa_chart','get_ascendant','get_planet_in_house','get_planet_in_sign','get_current_dasha','get_dasha_timeline','get_dasha_sandhi','get_birth_nakshatra','get_planet_yogas','get_transit_planets','get_full_chart_analysis','get_horoscope_predictions','get_match_report','get_numerology_prediction','get_ashtakvarga_data','astro_check_retrograde','astro_planetary_war_check']);
 const L1=new Set(['create_btr_session','save_runtime_snapshot','get_runtime_snapshot','purge_runtime_state','save_evolution_log','get_evolution_history','validate_sclass_gate','btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','btr_re_eval_pivots','btr_weight_adjuster','btr_prediction_tester','btr_write_notification','btr_finalize_confirmed','btr_finalize_held','init_btr_sheets','video_init_sheets','video_create_script','video_read_script','video_update_row_status','video_delete_script']);
 const L2=new Set(['gcloud_submit','cloudbuild_status','cloudrun_services','artifact_list','cloudrun_set_env','agent_registry_list','agent_registry_register']);
-const L3=new Set(['github_read_file','github_write_file','github_list_files','gh_push_files','sheets_read','sheets_write','http_request','get_system_status','append_sheet_row']);
-const L4=new Set(['read_google_doc','create_google_doc','create_spreadsheet','export_doc_as_pdf','delete_drive_file','create_drive_folder','delete_drive_folder','list_drive_contents','list_script_projects','get_script_content','update_script_file','deploy_script_webapp','backup_script_project','delete_artifact_image','list_run_revisions','delete_run_revision','create_btr_report_doc']);
+const L3=new Set(['github_read_file','github_write_file','github_list_files','gh_push_files','github_patch_file','sheets_read','sheets_write','sheets_update_row','http_request','get_system_status','append_sheet_row']);
+const L4=new Set(['read_google_doc','create_google_doc','docs_patch','create_spreadsheet','export_doc_as_pdf','delete_drive_file','create_drive_folder','delete_drive_folder','list_drive_contents','list_script_projects','get_script_content','update_script_file','deploy_script_webapp','backup_script_project','delete_artifact_image','list_run_revisions','delete_run_revision','create_btr_report_doc']);
 const L5=new Set(['call_gemini','call_claude','call_gpt']);
 const L6=new Set(['report_generate_btr_code','report_generate_summary','report_add_gemstone_advice','ops_audit_log_exporter','ops_pattern_match_failure']);
 
@@ -491,12 +495,67 @@ async function execSystem(n,a){
     if(n==='append_sheet_row'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[a.values]})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
   }
   if(n==='http_request'){const{url,method='GET',body,headers={}}=a;const opts={method,headers:{'Content-Type':'application/json',...headers}};if(body&&method!=='GET')opts.body=JSON.stringify(body);const r=await fetchWithTimeout(url,opts,30000);try{return{status:r.status,ok:r.ok,data:await r.json()};}catch{return{status:r.status,ok:r.ok,data:await r.text()};}}
+  if(n==='github_patch_file'){
+    if(!GITHUB_PAT)return{error:'GITHUB_PAT 미설정'};
+    const{repo,path,patches,message,branch='main'}=a;
+    if(!patches?.length)return{error:'patches 배열 필요'};
+    const ex=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/${path}?ref=${branch}`,{headers:ghH()},15000);
+    if(!ex.ok)return{error:`파일 없음: GitHub ${ex.status}`};
+    const fd=await ex.json();
+    let fc=Buffer.from(fd.content,'base64').toString('utf8');
+    const fsha=fd.sha;
+    const res=[];
+    for(const p of patches){
+      if(!fc.includes(p.find)){res.push({find:p.find.slice(0,60),status:'NOT_FOUND'});continue;}
+      const escaped=p.find.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      const cnt=(fc.match(new RegExp(escaped,'g'))||[]).length;
+      if(cnt>1){res.push({find:p.find.slice(0,60),status:'AMBIGUOUS',count:cnt});continue;}
+      fc=fc.replace(p.find,p.replace);
+      res.push({find:p.find.slice(0,60),status:'APPLIED'});
+    }
+    const applied=res.filter(r=>r.status==='APPLIED').length;
+    if(!applied)return{error:'적용된 패치 없음',results:res};
+    const wr=await fetchWithTimeout(`https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/${path}`,{method:'PUT',headers:ghH(),body:JSON.stringify({message,content:Buffer.from(fc).toString('base64'),branch,sha:fsha})},20000);
+    if(!wr.ok)return{error:`GitHub write ${wr.status}: ${(await wr.text()).slice(0,200)}`};
+    const rd=await wr.json();
+    return{success:true,commit:rd.commit?.sha,patches_applied:applied,total:patches.length,results:res,note:'자동배포 트리거됨'};
+  }
+  if(n==='sheets_update_row'){
+    const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};
+    const{spreadsheetId,range,key_column,key_value,updates}=a;
+    const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,{headers:{Authorization:`Bearer ${tok}`}});
+    if(!r.ok)return{error:`Sheets 읽기 ${r.status}`};
+    const rows=((await r.json()).values)||[];
+    const hdr=rows[0]||[];
+    const ki=hdr.indexOf(key_column);
+    if(ki<0)return{error:`키 컬럼 없음: ${key_column}. 헤더: [${hdr.join(',')}]`};
+    const ri=rows.findIndex((row,i)=>i>0&&row[ki]===String(key_value));
+    if(ri<0)return{error:`키 값 없음: ${key_value}`};
+    const row=[...rows[ri]];while(row.length<hdr.length)row.push('');
+    const upd=[];
+    Object.entries(updates).forEach(([k,v])=>{const ci=hdr.indexOf(k);if(ci>=0){row[ci]=v==null?'':String(v);upd.push(k);}});
+    if(!upd.length)return{error:'업데이트할 컬럼 없음. 헤더: ['+hdr.join(',')+']'};
+    const sn=range.split('!')[0];
+    const wr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sn}!A${ri+1}`)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[row]})});
+    if(!wr.ok)return{error:`Sheets 쓰기 ${wr.status}`};
+    return{success:true,row_index:ri,sheet_row:ri+1,key:`${key_column}=${key_value}`,updated_columns:upd};
+  }
   if(n==='get_system_status'){const[mcp]=await Promise.allSettled([fetchWithTimeout(`${MCP_URL}/`).then(r=>r.json())]);return{mcp_server:mcp.status==='fulfilled'?{ok:true,server:mcp.value?.server,tools:mcp.value?.totalTools}:{ok:false},github_pat:GITHUB_PAT?'✓':'✗',google_oauth:process.env.GOOGLE_REFRESH_TOKEN?'✓':'✗',gcp_adc:(await getGCPToken())?'✓ ADC 정상':'✗',timestamp:new Date().toISOString()};}
   return{error:`미구현: ${n}`};
 }
 
 async function execWorkspace(n,a){
   const tok=await getGoogleToken();if(!tok)return{error:'Google OAuth 인증 실패.'};
+  if(n==='docs_patch'){
+    const{document_id,patches}=a;
+    if(!patches?.length)return{error:'patches 배열 필요'};
+    const requests=patches.map(p=>({replaceAllText:{containsText:{text:p.find,matchCase:true},replaceText:p.replace}}));
+    const r=await fetchWithTimeout(`https://docs.googleapis.com/v1/documents/${document_id}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({requests})});
+    if(!r.ok)return{error:`Docs ${r.status}: ${(await r.text()).slice(0,200)}`};
+    const result=await r.json();
+    const summary=(result.replies||[]).map((rep,i)=>({find:patches[i]?.find?.slice(0,60),occurrences:rep.replaceAllText?.occurrencesChanged||0}));
+    return{success:true,total_changed:summary.reduce((s,x)=>s+x.occurrences,0),patches:summary};
+  }
   if(n==='read_google_doc'){const r=await fetchWithTimeout(`https://docs.googleapis.com/v1/documents/${a.document_id}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Docs ${r.status}: ${await r.text()}`};const d=await r.json();return{title:d.title,content:d.body.content.flatMap(b=>b.paragraph?.elements??[]).map(el=>el.textRun?.content??'').join('')};}
   if(n==='create_google_doc'){const r=await fetchWithTimeout('https://docs.googleapis.com/v1/documents',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({title:a.title})});if(!r.ok)return{error:`Docs ${r.status}`};const d=await r.json();if(a.content)await fetchWithTimeout(`https://docs.googleapis.com/v1/documents/${d.documentId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:[{insertText:{location:{index:1},text:a.content}}]})});if(a.folder_id)await fetchWithTimeout(`https://www.googleapis.com/drive/v3/files/${d.documentId}?addParents=${a.folder_id}&fields=id`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`}}).catch(()=>{});return{document_id:d.documentId,title:d.title,url:`https://docs.google.com/document/d/${d.documentId}`};}
   if(n==='create_spreadsheet'){const r=await fetchWithTimeout('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({properties:{title:a.title},sheets:[{properties:{title:a.sheet_name||'Sheet1'}}]})});if(!r.ok)return{error:`Sheets ${r.status}`};const d=await r.json();if(a.folder_id)await fetchWithTimeout(`https://www.googleapis.com/drive/v3/files/${d.spreadsheetId}?addParents=${a.folder_id}&fields=id`,{method:'PATCH',headers:{Authorization:`Bearer ${tok}`}}).catch(()=>{});return{spreadsheet_id:d.spreadsheetId,url:`https://docs.google.com/spreadsheets/d/${d.spreadsheetId}`};}
@@ -596,12 +655,12 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
 app.get('/',(_req,res)=>res.json({
-  status:'running',server:'ASTERION AI Evolution Engine v5.11.1',
+  status:'running',server:'ASTERION AI Evolution Engine v5.12',
   transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
   layers:{L0:`VedAstro(${L0.size})`,L1:`BTR+Video(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
   totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)
 }));
 app.listen(PORT,'0.0.0.0',()=>{
   console.log(`\n🔱 ASTERION AI Evolution Engine v5.11.1 | port:${PORT} | tools:${ALL_TOOLS.length}`);
-  console.log(`   v5.11.1: syntax fix (semicolon removed from append_sheet_row object literal)\n`);
+  console.log(`   v5.12: +github_patch_file, +sheets_update_row, +docs_patch\n`);
 });
