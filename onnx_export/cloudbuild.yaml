@@ -5,10 +5,7 @@ steps:
       - '-c'
       - |
         pip install -q optimum[exporters] transformers torch accelerate && \
-        python /workspace/onnx_export/convert_vits.py
-    volumes:
-      - name: 'workspace'
-        path: '/workspace'
+        python onnx_export/convert_vits.py
     timeout: '1800s'
 
 timeout: '1800s'
