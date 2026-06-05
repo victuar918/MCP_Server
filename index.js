@@ -1,5 +1,7 @@
 /**
- * ASTERION AI Evolution Engine v5.11
+ * ASTERION AI Evolution Engine v5.13
+ * v5.13: VedAstro API 버그 수정 — POST→GET 전환, CurrentPlanetData 제거→AllPlanetData 행성별 루프,
+ *   BirthTime/TimeZone 잘못된 필드명 제거, dtToVed() 헬퍼 추가, get_planet_in_house URL 수정
  * v5.11: video_init_sheets 전면 개편 — 별도 SS 생성 + 8개 시트 + EFFECTS_CATALOG 전체 프리셋
  *   - create_new:true → SA가 새 SS 생성 후 victuar918@gmail.com에 공유
  *   - 8개 시트: VIDEO_SCRIPT(A-R 18컬럼) / CRYPTO_BIRTH_CHARTS / SOURCE_FILES / PROMO_SOURCES
@@ -321,9 +323,17 @@ async function execVedAstro(n,a){
     if(n==='get_ashtakvarga_data'){const tp=vedPath(la,lo,bt,bd,btz);const[s,b]=await Promise.all([vedFetch(`${VEDASTRO_BASE}/Calculate/SarvashtakavargaChart${tp}`),vedFetch(`${VEDASTRO_BASE}/Calculate/BhinnashtakavargaChart${tp}`)]);return{SarvashtakavargaChart:s,BhinnashtakavargaChart:b};}
     if(n==='astro_check_retrograde')return await vedFetch(`${VEDASTRO_BASE}/Calculate/IsPlanetRetrograde/${a.planet}${vedPath(la,lo,'00:00',dt.split('T')[0]||dt,tz)}`);
     if(n==='astro_planetary_war_check')return await vedFetch(`${VEDASTRO_BASE}/Calculate/PlanetaryWar${vedPath(la,lo,'00:00',dt,tz)}`);
-    const map={get_planet_positions:'AllPlanetData',get_house_positions:'AllHouseData',get_navamsa_chart:'NavamsaChart',get_ascendant:'AscendantSign',get_planet_yogas:'AllYogas',get_dasha_sandhi:'DashaSandhi',get_birth_nakshatra:'BirthNakshatra',get_transit_planets:'CurrentPlanetData',get_full_chart_analysis:'AllPlanetData'};
-    if(map[n]){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/${map[n]}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
-    if(n==='get_planet_in_house'||n==='get_planet_in_sign'){const ep=n==='get_planet_in_house'?'PlanetHouseNumber':'PlanetRasiSign';const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/${ep}/${a.planet}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
+    // v5.13 Fix: ISO dateTime → vedPath 분해 헬퍼 (HH:MM / DD-MM-YYYY)
+    function dtToVed(s){const[dp,tp='12:00']=(s||'2000-01-01').split('T');const[yr,mo,dy]=(dp||'2000-01-01').split('-');return{t:(tp||'12:00').slice(0,5),d:`${(dy||'01').padStart(2,'0')}-${(mo||'01').padStart(2,'0')}-${yr||'2000'}`};}
+    const PLANETS=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu'];
+    // 단순 GET 매핑 (행성명 불필요한 엔드포인트)
+    const simpleGET={get_house_positions:'AllHouseData',get_navamsa_chart:'NavamsaChart',get_ascendant:'AscendantSign',get_planet_yogas:'AllYogas',get_dasha_sandhi:'DashaSandhi',get_birth_nakshatra:'BirthNakshatra',get_full_chart_analysis:'AllPlanetData'};
+    if(simpleGET[n]){const{t,d}=dtToVed(dt);return await vedFetch(`${VEDASTRO_BASE}/Calculate/${simpleGET[n]}${vedPath(la,lo,t,d,tz)}`);}
+    // get_planet_positions: 9행성 AllPlanetData 병렬 GET
+    if(n==='get_planet_positions'){const{t,d}=dtToVed(dt);const res=await Promise.all(PLANETS.map(p=>vedFetch(`${VEDASTRO_BASE}/Calculate/AllPlanetData/PlanetName/${p}${vedPath(la,lo,t,d,tz)}`).catch(e=>({error:e.message}))));return Object.fromEntries(PLANETS.map((p,i)=>[p,res[i]]));}
+    // get_transit_planets: CurrentPlanetData(미존재) 제거 → 현재시각 기준 AllPlanetData 루프
+    if(n==='get_transit_planets'){const tdt=a.targetDate||new Date().toISOString();const{t,d}=dtToVed(tdt);const res=await Promise.all(PLANETS.map(p=>vedFetch(`${VEDASTRO_BASE}/Calculate/AllPlanetData/PlanetName/${p}${vedPath(la,lo,t,d,tz)}`).catch(e=>({error:e.message}))));return{transit_date:tdt,planets:Object.fromEntries(PLANETS.map((p,i)=>[p,res[i]]))};}
+    if(n==='get_planet_in_house'||n==='get_planet_in_sign'){const ep=n==='get_planet_in_house'?'PlanetHouseNumber':'PlanetRasiSign';const{t,d}=dtToVed(dt);return await vedFetch(`${VEDASTRO_BASE}/Calculate/${ep}/PlanetName/${a.planet}${vedPath(la,lo,t,d,tz)}`);}
     if(n==='get_current_dasha'){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/CurrentDasha`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,TargetTime:a.targetDate||new Date().toISOString(),Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
     if(n==='get_dasha_timeline'){const r=await fetchWithTimeout(`${VEDASTRO_BASE}/Calculate/DashaTimeline`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({BirthTime:dt,Location:{Latitude:parseFloat(la),Longitude:parseFloat(lo)},TimeZone:tz,StartYear:a.startYear,EndYear:a.endYear})});return r.ok?await r.json():{error:`HTTP ${r.status}`};}
     return{error:`미구현: ${n}`};
