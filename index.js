@@ -73,7 +73,7 @@ async function getGoogleOAuthToken() {
 }
 async function getGoogleToken() { return await getGoogleOAuthToken() || await getGCPToken(); }
 const ghH = () => ({ 'Authorization':`Bearer ${GITHUB_PAT}`, 'Accept':'application/vnd.github.v3+json', 'User-Agent':'ASTERION', 'Content-Type':'application/json' });
-function vedPath(la, lo, t, d, tz) { return `/Location/${la},${lo}/Time/${t}/${d}/${tz}/Ayanamsa/LAHIRI`; }
+function vedPath(la, lo, t, d, tz) { const [dd,mm,yyyy]=d.split('-'); return `/Location/${la},${lo}/Time/${t}/${dd}/${mm}/${yyyy}/${tz}/Ayanamsa/LAHIRI`; }
 async function vedFetch(url) {
   const h = VEDASTRO_KEY ? {'Authorization':`Bearer ${VEDASTRO_KEY}`} : {};
   const r = await fetchWithTimeout(url, {headers:h}, 25000);
