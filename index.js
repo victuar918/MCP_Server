@@ -1,5 +1,6 @@
 /**
  * ASTERION AI Evolution Engine v5.17
+ * v5.18: +delete_sheet_row +insert_sheet_row (Sheets batchUpdate deleteDimension/insertDimension)
  * v5.17: list_script_projects → Drive API 교체 (Apps Script API /v1/projects 엔드포인트 없음 → Drive mimeType 쿼리)
  * v5.16: get_timezone getGCPToken to getGoogleToken (OAuth priority)
  * v5.15: get_timezone → Google Timezone API (GCP ADC) 교체 — 역사적 DST 지원
