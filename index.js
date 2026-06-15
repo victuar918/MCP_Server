@@ -1,5 +1,8 @@
 /**
- * ASTERION AI Evolution Engine v5.17
+ * ASTERION AI Evolution Engine v5.19
+ * v5.19: video_create_script+sheets_write — VS_/VIDEO_* 시트 한정 \uXXXX literal → 실제 문자 자동 변환 (한글 깨짐 방지, BTR 시트 무영향)
+ * v5.18: +delete_sheet_row +insert_sheet_row (Sheets batchUpdate deleteDimension/insertDimension)
+ * v5.17: list_script_projects → Drive API 교체 (Apps Script API /v1/projects 엔드포인트 없음 → Drive mimeType 쿼리)
  * v5.18: +delete_sheet_row +insert_sheet_row (Sheets batchUpdate deleteDimension/insertDimension)
  * v5.17: list_script_projects → Drive API 교체 (Apps Script API /v1/projects 엔드포인트 없음 → Drive mimeType 쿼리)
  * v5.16: get_timezone getGCPToken to getGoogleToken (OAuth priority)
@@ -84,6 +87,13 @@ async function vedFetch(url) {
   if (j.Status !== 'Pass') throw new Error(`VedAstro: ${JSON.stringify(j.Payload)}`);
   return j.Payload;
 }
+
+// ★ v5.19: 영상 시트 전용 Unicode 이스케이프 정규화
+// VS_* 및 VIDEO_* 8개 시트에서만 작동. BTR/Archive 시트는 무영향.
+const VIDEO_TEXT_SHEETS=new Set(['VIDEO_SCRIPT','CRYPTO_BIRTH_CHARTS','SOURCE_FILES','PROMO_SOURCES','EFFECTS_CATALOG','VOICE_CONFIG','SECTION_PRESETS','VIDEO_META_TEMPLATE']);
+function isVideoSheet(range){const name=range.split('!')[0].replace(/^'|'$/g,'');return name.startsWith('VS_')||VIDEO_TEXT_SHEETS.has(name);}
+function sanitizeVideoText(val){if(typeof val!=='string')return val;return val.replace(/\u([0-9a-fA-F]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
+function sanitizeRows(rows){return rows.map(row=>row.map(sanitizeVideoText));}
 
 async function writeNotification(tok, session_id, type, title, content) {
   const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
@@ -413,7 +423,7 @@ async function execBTR(n,a){
       ['','Main_BGM',a.video_meta?.main_bgm||''],
       [''],
       ['Section','Speaker','Card_Main','Card_Sub','Card_Desc','Highlight_Word','Script','BG_File','Animation','Card_Style','Status','Note','BG_Effect','BG_Transition','Card_ExtraEffect','Lottie_File','Sticker_File','Gradient_Preset'],
-      ...(a.script_rows||[]).map(r=>[r.Section||'',String(r.Speaker||'1'),r.Card_Main||'',r.Card_Sub||'',r.Card_Desc||'',r.Highlight_Word||'',r.Script||'',r.BG_File||'',r.Animation||'A',r.Card_Style||'DEFAULT','READY',r.Note||'',r.BG_Effect||'NONE',r.BG_Transition||'FADE',r.Card_ExtraEffect||'NONE',r.Lottie_File||'NONE',r.Sticker_File||'NONE',r.Gradient_Preset||'DEFAULT'])
+      ...(a.script_rows||[]).map(r=>[r.Section||'',String(r.Speaker||'1'),sanitizeVideoText(r.Card_Main||''),sanitizeVideoText(r.Card_Sub||''),sanitizeVideoText(r.Card_Desc||''),sanitizeVideoText(r.Highlight_Word||''),sanitizeVideoText(r.Script||''),r.BG_File||'',r.Animation||'A',r.Card_Style||'DEFAULT','READY',sanitizeVideoText(r.Note||''),r.BG_Effect||'NONE',r.BG_Transition||'FADE',r.Card_ExtraEffect||'NONE',r.Lottie_File||'NONE',r.Sticker_File||'NONE',r.Gradient_Preset||'DEFAULT'])
     ];
     const wr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(sheetName+'!A1')}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:metaRows})},15000);
     return{success:wr.ok,sheet_name:sheetName,total_rows:metaRows.length,script_rows:a.script_rows?.length||0,columns:'A-R (18컬럼)',url:`https://docs.google.com/spreadsheets/d/${ssId}`};
@@ -509,7 +519,7 @@ async function execSystem(n,a){
   if(['sheets_read','sheets_write','append_sheet_row'].includes(n)){
     const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};
     if(n==='sheets_read'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Sheets ${r.status}`};const d=await r.json();return{values:d.values||[],range:d.range};}
-    if(n==='sheets_write'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:a.values})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
+    if(n==='sheets_write'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:isVideoSheet(a.range)?sanitizeRows(a.values):a.values})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
     if(n==='append_sheet_row'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[a.values]})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
   }
   if(n==='http_request'){const{url,method='GET',body,headers={}}=a;const opts={method,headers:{'Content-Type':'application/json',...headers}};if(body&&method!=='GET')opts.body=JSON.stringify(body);const r=await fetchWithTimeout(url,opts,30000);try{return{status:r.status,ok:r.ok,data:await r.json()};}catch{return{status:r.status,ok:r.ok,data:await r.text()};}}
@@ -675,7 +685,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
 app.get('/',(_req,res)=>res.json({
-  status:'running',server:'ASTERION AI Evolution Engine v5.12',
+  status:'running',server:'ASTERION AI Evolution Engine v5.19',
   transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
   layers:{L0:`VedAstro(${L0.size})`,L1:`BTR+Video(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
   totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)
