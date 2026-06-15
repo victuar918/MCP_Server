@@ -92,7 +92,7 @@ async function vedFetch(url) {
 // VS_* 및 VIDEO_* 8개 시트에서만 작동. BTR/Archive 시트는 무영향.
 const VIDEO_TEXT_SHEETS=new Set(['VIDEO_SCRIPT','CRYPTO_BIRTH_CHARTS','SOURCE_FILES','PROMO_SOURCES','EFFECTS_CATALOG','VOICE_CONFIG','SECTION_PRESETS','VIDEO_META_TEMPLATE']);
 function isVideoSheet(range){const name=range.split('!')[0].replace(/^'|'$/g,'');return name.startsWith('VS_')||VIDEO_TEXT_SHEETS.has(name);}
-function sanitizeVideoText(val){if(typeof val!=='string')return val;return val.replace(/\u([0-9a-fA-F]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
+function sanitizeVideoText(val){if(typeof val!=='string')return val;return val.replace(/\\u([0-9a-fA-F]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
 function sanitizeRows(rows){return rows.map(row=>row.map(sanitizeVideoText));}
 
 async function writeNotification(tok, session_id, type, title, content) {
