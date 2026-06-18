@@ -331,8 +331,10 @@ function buildAntiAnchoredContext(p){if(!p)return'';const{round,critical_issues,
 
 async function execVedAstro(n,a){
   try{
-    const la=String(a.latitude||a.lat||''),lo=String(a.longitude||a.lng||''),tz=a.timezone||'+09:00',dt=a.dateTime||a.birthDateTime||a.targetDate||'';
-    const bd=a.birth_date||'',bt=a.birth_time||'',btz=a.timezone||'+09:00';
+    const la=String(a.latitude??a.lat??''),lo=String(a.longitude??a.lng??''),tz=a.timezone,dt=a.dateTime||a.birthDateTime||a.targetDate||'';
+    const bd=a.birth_date||'',bt=a.birth_time||'',btz=a.timezone;
+    const NO_TZ=new Set(['geocode_location','get_timezone','get_numerology_prediction','get_match_report']);
+    if(!NO_TZ.has(n)&&!a.timezone)return{error:`${n}: timezone required - pass utc_offset from get_timezone(lat,lng,dateTime), e.g. "+09:00" or "+00:00" (IANA names and "UTC" string not accepted)`};
     if(n==='geocode_location'){const _geoKey=process.env.GOOGLE_MAPS_API_KEY||'';if(!_geoKey)return{error:'GOOGLE_MAPS_API_KEY not set'};const r=await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(a.location)}&key=${_geoKey}`,{},10000);if(!r.ok)return{error:`Geocoding API ${r.status}`};const j=await r.json();if(j.status!=='OK')return{error:`Geocoding: ${j.status}`};const loc=j.results[0].geometry.location;return{latitude:loc.lat,longitude:loc.lng,formatted_address:j.results[0].formatted_address};}
     if(n==='get_timezone'){const _mapsKey=process.env.GOOGLE_MAPS_API_KEY||'';if(!_mapsKey)return{error:'GOOGLE_MAPS_API_KEY not set'};const _ts=Math.floor(new Date(dt||new Date().toISOString()).getTime()/1000);const r=await fetchWithTimeout(`https://maps.googleapis.com/maps/api/timezone/json?location=${la},${lo}&timestamp=${_ts}&key=${_mapsKey}`,{},15000);if(!r.ok)return{error:`Google Timezone API ${r.status}`};const j=await r.json();if(j.status!=='OK')return{error:`Google Timezone: ${j.status}${j.errorMessage?' - '+j.errorMessage:''}`};const _tzTotal=j.rawOffset+j.dstOffset;const _tzSign=_tzTotal>=0?'+':'-';const _tzAbs=Math.abs(_tzTotal);return{timezone_id:j.timeZoneId,timezone_name:j.timeZoneName,raw_offset_sec:j.rawOffset,dst_offset_sec:j.dstOffset,utc_offset:`${_tzSign}${String(Math.floor(_tzAbs/3600)).padStart(2,'0')}:${String(Math.floor(_tzAbs%3600/60)).padStart(2,'0')}`};}
     if(n==='get_horoscope_predictions')return await vedFetch(`${VEDASTRO_BASE}/Calculate/HoroscopePredictions${vedPath(la,lo,bt,bd,btz)}`);
