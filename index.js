@@ -36,6 +36,7 @@ const GCP_REGION      = process.env.GCP_REGION      || 'asia-northeast3';
 const VEDASTRO_BASE   = 'https://api.vedastro.org/api';
 const VEDASTRO_KEY    = process.env.VEDASTRO_API_KEY || '';
 const ARCHIVE_SS_ID   = '1ym1cgr1apEyTlqtJXqrfdnLjoyJTh086CjGycMcUOS8';
+const VIDEO_SS_ID     = '1ugWJmyLItD95Vz7Jq8Wjxn0_Ml5REjrhUxNZVFoIFmc';
 const RUNTIME_SHEET   = 'BTRRuntime';
 const NOTIF_SHEET     = 'BTRNotifications';
 const MCP_URL         = 'https://mcp-server-611151539232.asia-northeast3.run.app';
@@ -367,7 +368,7 @@ async function execBTR(n,a){
   if(n==='video_init_sheets'){
     const gTok=await getGCPToken();
     if(!gTok)return{error:'GCP ADC 인증 실패'};
-    let ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    let ssId=a.spreadsheet_id||VIDEO_SS_ID;
     const result={created:[],headers_written:{},spreadsheet_id:ssId};
     if(a.create_new){
       const title=a.title||'ASTERION Video Automation';
@@ -413,7 +414,7 @@ async function execBTR(n,a){
 
   if(n==='video_create_script'){
     const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
-    const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    const ssId=a.spreadsheet_id||VIDEO_SS_ID;
     const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
     const sheetName=`VS_${a.coin}_${a.date||today}`;
     const cr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:[{addSheet:{properties:{title:sheetName}}}]})},15000);
@@ -433,7 +434,7 @@ async function execBTR(n,a){
 
   if(n==='video_read_script'){
     const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
-    const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    const ssId=a.spreadsheet_id||VIDEO_SS_ID;
     const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(a.sheet_name)}`,{headers:{Authorization:`Bearer ${gTok}`}},10000);
     if(!r.ok)return{error:`읽기 실패 ${r.status}`};
     const rows=((await r.json()).values)||[];
@@ -446,7 +447,7 @@ async function execBTR(n,a){
 
   if(n==='video_update_row_status'){
     const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
-    const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    const ssId=a.spreadsheet_id||VIDEO_SS_ID;
     const sheetRow=a.row_index+7;
     const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(a.sheet_name+'!K'+sheetRow)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${gTok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[[a.status||'DONE']]})},10000);
     return{success:r.ok,sheet_name:a.sheet_name,row_index:a.row_index,sheet_row:sheetRow,status:a.status};
@@ -454,7 +455,7 @@ async function execBTR(n,a){
 
   if(n==='video_delete_script'){
     const gTok=await getGCPToken();if(!gTok)return{error:'GCP ADC 인증 실패'};
-    const ssId=a.spreadsheet_id||ARCHIVE_SS_ID;
+    const ssId=a.spreadsheet_id||VIDEO_SS_ID;
     const si=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties`,{headers:{Authorization:`Bearer ${gTok}`}},10000);
     if(!si.ok)return{error:`SS 조회 실패 ${si.status}`};
     const sh=((await si.json()).sheets||[]).find(s=>s.properties.title===a.sheet_name);
