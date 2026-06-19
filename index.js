@@ -347,7 +347,7 @@ async function execVedAstro(n,a){
     function dtToVed(s){const[dp,tp='12:00']=(s||'2000-01-01').split('T');const[yr,mo,dy]=(dp||'2000-01-01').split('-');return{t:(tp||'12:00').slice(0,5),d:`${(dy||'01').padStart(2,'0')}-${(mo||'01').padStart(2,'0')}-${yr||'2000'}`};}
     const PLANETS=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu'];
     // 단순 GET 매핑 (행성명 불필요한 엔드포인트)
-    const simpleGET={get_house_positions:'AllHouseData',get_navamsa_chart:'NavamsaChart',get_ascendant:'AscendantSign',get_planet_yogas:'AllYogas',get_birth_nakshatra:'BirthNakshatra',get_full_chart_analysis:'AllPlanetData'};
+    const simpleGET={get_house_positions:'AllHouseRasiSigns',get_navamsa_chart:'AllPlanetNavamshaSign',get_ascendant:'LagnaSignName',get_planet_yogas:'AllYogas',get_birth_nakshatra:'AllPlanetConstellation',get_full_chart_analysis:'AllPlanetData'};
     if(simpleGET[n]){const{t,d}=dtToVed(dt);return await vedFetch(`${VEDASTRO_BASE}/Calculate/${simpleGET[n]}${vedPath(la,lo,t,d,tz)}`);}
     // get_planet_positions: 9행성 AllPlanetData 병렬 GET
     if(n==='get_planet_positions'){const{t,d}=dtToVed(dt);const res=await Promise.all(PLANETS.map(p=>vedFetch(`${VEDASTRO_BASE}/Calculate/AllPlanetData/PlanetName/${p}${vedPath(la,lo,t,d,tz)}`).catch(e=>({error:e.message}))));return Object.fromEntries(PLANETS.map((p,i)=>[p,res[i]]));}
