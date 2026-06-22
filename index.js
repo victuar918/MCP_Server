@@ -1,5 +1,6 @@
 /**
- * ASTERION AI Evolution Engine v5.19
+ * ASTERION AI Evolution Engine v5.20
+ * v5.20: #3 video Script(G) integrity gate (sheetName AND colG dual-scope; atomic reject isolated-jamo/latin/emoji) + NFC in shared sanitizer (also fixes deescape backslash bug); #5 timezone format-guard replaces existence-guard; get_match_report dual person1_tz/person2_tz
  * v5.19: video_create_script+sheets_write — VS_/VIDEO_* 시트 한정 \uXXXX literal → 실제 문자 자동 변환 (한글 깨짐 방지, BTR 시트 무영향)
  * v5.18: +delete_sheet_row +insert_sheet_row (Sheets batchUpdate deleteDimension/insertDimension)
  * v5.17: list_script_projects → Drive API 교체 (Apps Script API /v1/projects 엔드포인트 없음 → Drive mimeType 쿼리)
@@ -93,8 +94,16 @@ async function vedFetch(url) {
 // VS_* 및 VIDEO_* 8개 시트에서만 작동. BTR/Archive 시트는 무영향.
 const VIDEO_TEXT_SHEETS=new Set(['VIDEO_SCRIPT','CRYPTO_BIRTH_CHARTS','SOURCE_FILES','PROMO_SOURCES','EFFECTS_CATALOG','VOICE_CONFIG','SECTION_PRESETS','VIDEO_META_TEMPLATE']);
 function isVideoSheet(range){const name=range.split('!')[0].replace(/^'|'$/g,'');return name.startsWith('VS_')||VIDEO_TEXT_SHEETS.has(name);}
-function sanitizeVideoText(val){if(typeof val!=='string')return val;return val.replace(/\\u([0-9a-fA-F]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
+function _deescapeUnicode(val){if(val==null||typeof val!=='string')return val;let out='',i=0,bs=String.fromCharCode(92);while(i<val.length){if(val[i]===bs&&val[i+1]==='u'&&/^[0-9a-fA-F]{4}$/.test(val.slice(i+2,i+6))){out+=String.fromCharCode(parseInt(val.slice(i+2,i+6),16));i+=6;}else{out+=val[i++];}}return out;}
+function _deescapeUnicodeOld(val){if(typeof val!=='string')return val;return val.replace(/\\u([0-9a-fA-F]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
 function sanitizeRows(rows){return rows.map(row=>row.map(sanitizeVideoText));}
+function nfc(v){return typeof v==='string'?v.normalize('NFC'):v;}
+function sanitizeVideoText(val){return nfc(_deescapeUnicode(val));}
+function colToIdx(letters){let n=0;for(const ch of String(letters).toUpperCase()){const d=ch.charCodeAt(0)-64;if(d<1||d>26)break;n=n*26+d;}return n-1;}
+function rangeStartColIdx(range){const parts=String(range).split('!');if(parts.length<2)return 0;const a1=(parts[1]||'').replace(/^'|'$/g,'');const m=a1.match(/[A-Za-z]+/);return m?colToIdx(m[0]):0;}
+function isScriptSheet(name){return name==='VIDEO_SCRIPT'||name.startsWith('VS_');}
+function scriptCellIssues(text){const issues=[];const s=String(text==null?'':text);for(let i=0;i<s.length;i++){const c=s.codePointAt(i);const hi=c>0xFFFF;if(c>=0xAC00&&c<=0xD7A3){if(hi)i++;continue;}if((c>=0x1100&&c<=0x11FF)||(c>=0x3130&&c<=0x318F)){issues.push({index:i,type:'isolated_jamo',char:s[i]});continue;}if((c>=0x41&&c<=0x5A)||(c>=0x61&&c<=0x7A)){issues.push({index:i,type:'latin',char:s[i]});continue;}if(c>=0x1F000){issues.push({index:i,type:'emoji',char:String.fromCodePoint(c)});if(hi)i++;continue;}if(hi)i++;}return issues;}
+function validateScriptRows(values,range){const sheetName=String(range).split('!')[0].replace(/^'|'$/g,'');if(!isScriptSheet(sheetName))return null;const startCol=rangeStartColIdx(range);const bad=[];(values||[]).forEach((row,r)=>{(row||[]).forEach((cell,j)=>{if(startCol+j!==6)return;const iss=scriptCellIssues(cell);if(iss.length)bad.push({row:r,col:'G',value:String(cell).slice(0,40),issues:iss});});});return bad.length?bad:null;}
 
 async function writeNotification(tok, session_id, type, title, content) {
   const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
@@ -334,8 +343,8 @@ async function execVedAstro(n,a){
   try{
     const la=String(a.latitude??a.lat??''),lo=String(a.longitude??a.lng??''),tz=a.timezone,dt=a.dateTime||a.birthDateTime||a.targetDate||'';
     const bd=a.birth_date||'',bt=a.birth_time||'',btz=a.timezone;
-    const NO_TZ=new Set(['geocode_location','get_timezone','get_numerology_prediction','get_match_report']);
-    if(!NO_TZ.has(n)&&!a.timezone)return{error:`${n}: timezone required - pass utc_offset from get_timezone(lat,lng,dateTime), e.g. "+09:00" or "+00:00" (IANA names and "UTC" string not accepted)`};
+    const NO_TZ=new Set(['geocode_location','get_timezone','get_numerology_prediction']);const TZ_RE=/^[+-][0-9]{2}:[0-9]{2}$/;
+    if(n==='get_match_report'){for(const _k of ['person1_tz','person2_tz']){if(!TZ_RE.test(a[_k]||''))return{error:`${n}: ${_k} must be a UTC offset like "+09:00" or "+00:00" (got "${a[_k]==null?'':a[_k]}"). IANA names ("Asia/Seoul") and "UTC" are not accepted; they silently fall back to +00:00.`};}}else if(!NO_TZ.has(n)){if(!TZ_RE.test(a.timezone||''))return{error:`${n}: timezone must be a UTC offset like "+09:00" or "+00:00" (got "${a.timezone==null?'':a.timezone}"). Pass utc_offset from get_timezone(lat,lng,dateTime); IANA names and "UTC" string not accepted.`};}
     if(n==='geocode_location'){const _geoKey=process.env.GOOGLE_MAPS_API_KEY||'';if(!_geoKey)return{error:'GOOGLE_MAPS_API_KEY not set'};const r=await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(a.location)}&key=${_geoKey}`,{},10000);if(!r.ok)return{error:`Geocoding API ${r.status}`};const j=await r.json();if(j.status!=='OK')return{error:`Geocoding: ${j.status}`};const loc=j.results[0].geometry.location;return{latitude:loc.lat,longitude:loc.lng,formatted_address:j.results[0].formatted_address};}
     if(n==='get_timezone'){const _mapsKey=process.env.GOOGLE_MAPS_API_KEY||'';if(!_mapsKey)return{error:'GOOGLE_MAPS_API_KEY not set'};const _ts=Math.floor(new Date(dt||new Date().toISOString()).getTime()/1000);const r=await fetchWithTimeout(`https://maps.googleapis.com/maps/api/timezone/json?location=${la},${lo}&timestamp=${_ts}&key=${_mapsKey}`,{},15000);if(!r.ok)return{error:`Google Timezone API ${r.status}`};const j=await r.json();if(j.status!=='OK')return{error:`Google Timezone: ${j.status}${j.errorMessage?' - '+j.errorMessage:''}`};const _tzTotal=j.rawOffset+j.dstOffset;const _tzSign=_tzTotal>=0?'+':'-';const _tzAbs=Math.abs(_tzTotal);return{timezone_id:j.timeZoneId,timezone_name:j.timeZoneName,raw_offset_sec:j.rawOffset,dst_offset_sec:j.dstOffset,utc_offset:`${_tzSign}${String(Math.floor(_tzAbs/3600)).padStart(2,'0')}:${String(Math.floor(_tzAbs%3600/60)).padStart(2,'0')}`};}
     if(n==='get_horoscope_predictions')return await vedFetch(`${VEDASTRO_BASE}/Calculate/HoroscopePredictions${vedPath(la,lo,bt,bd,btz)}`);
@@ -522,7 +531,7 @@ async function execSystem(n,a){
   if(['sheets_read','sheets_write','append_sheet_row'].includes(n)){
     const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};
     if(n==='sheets_read'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return{error:`Sheets ${r.status}`};const d=await r.json();return{values:d.values||[],range:d.range};}
-    if(n==='sheets_write'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:isVideoSheet(a.range)?sanitizeRows(a.values):a.values})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
+    if(n==='sheets_write'){const _vid=isVideoSheet(a.range);const _vals=_vid?sanitizeRows(a.values):a.values;if(_vid){const _vbad=validateScriptRows(_vals,a.range);if(_vbad)return{error:'script_validation_failed',rejected:true,cells:_vbad};}const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:_vals})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
     if(n==='append_sheet_row'){const r=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${a.spreadsheetId}/values/${encodeURIComponent(a.range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[a.values]})});return r.ok?await r.json():{error:`Sheets ${r.status}`};}
   }
   if(n==='http_request'){const{url,method='GET',body,headers={}}=a;const opts={method,headers:{'Content-Type':'application/json',...headers}};if(body&&method!=='GET')opts.body=JSON.stringify(body);const r=await fetchWithTimeout(url,opts,30000);try{return{status:r.status,ok:r.ok,data:await r.json()};}catch{return{status:r.status,ok:r.ok,data:await r.text()};}}
@@ -688,7 +697,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
 app.get('/',(_req,res)=>res.json({
-  status:'running',server:'ASTERION AI Evolution Engine v5.19',
+  status:'running',server:'ASTERION AI Evolution Engine v5.20',
   transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
   layers:{L0:`VedAstro(${L0.size})`,L1:`BTR+Video(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
   totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)
