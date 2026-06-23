@@ -1,6 +1,6 @@
 # ASTERION 시스템 로드맵 & 유지관리 가이드
 
-> **최종 업데이트**: 2026-05-23  
+> **최종 업데이트**: 2026-06-23  
 > **현재 버전**: MCP v5.9 · Hub v3.6
 
 ---
@@ -128,6 +128,9 @@ MCP_SECRET_KEY
 ---
 
 ## ⚠️ 알아두면 유용한 함정들
+
+### VedAstro AllPlanetData(All) POST is broken (confirmed 2026-06-23)
+POST /Calculate/AllPlanetData with PlanetName "All" returns the FIRST planet (Sun) data duplicated across all 9 planets. Reproduced across two birth times (distinct signs 1 of 9 both times). This is exactly why v5.13 switched to the per-planet AllPlanetData/PlanetName/{p} GET loop. DO NOT replace that loop with the All-POST: it silently corrupts every planet to Sun. AllPlanetRasiSigns POST returns correct distinct per-planet signs but only sign+degree, not the ~142-field per-planet object that get_planet_positions / get_transit_planets return, so it cannot replace the loop either. The loop already runs in parallel (Promise.all) so wall-clock is about one round-trip; negligible latency to gain. Conclusion: keep the GET loop, no code change.
 
 ### Gemini array 파라미터
 ```javascript
