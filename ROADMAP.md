@@ -1,7 +1,7 @@
 # ASTERION 시스템 로드맵 & 유지관리 가이드
 
-> **최종 업데이트**: 2026-06-24
-> **현재 버전**: MCP v5.18 · Hub v3.6
+> **최종 업데이트**: 2026-07-02
+> **현재 버전**: MCP v5.22 · Hub v3.6
 
 ---
 
@@ -42,18 +42,18 @@
 
 ## ✅ 완료된 구축 항목
 
-### MCP 서버 (v5.18)
-- [x] L0~L6 계층 구조 89개 도구 (VedAstro, BTR, GCloud, SystemOps, Workspace, AI, Report)
-- [x] `gh_push_files`: 여러 파일 한 번의 코미으로 push (Git Tree API)
+### MCP 서버 (v5.18 기준)
+- [x] L0~L6 계층 구조 도구 (VedAstro, BTR, GCloud, SystemOps, Workspace, AI, Report) — 현재 배포 v5.22 · 92개 도구
+- [x] `gh_push_files`: 여러 파일 한 번의 커밋으로 push (Git Tree API)
 - [x] `github_patch_file`: 파일 부분 업데이트 (find/replace 배열)
-- [x] `sheets_update_row`: 키 콼럼으로 행 찾아 지정 콼럼만 수정
+- [x] `sheets_update_row`: 키 컬럼으로 행 찾아 지정 컬럼만 수정
 - [x] `delete_sheet_row`: Sheets batchUpdate deleteDimension — row_index 또는 key_column+key_value
 - [x] `insert_sheet_row`: Sheets batchUpdate insertDimension — row_index 위치에 행 삽입, values 선택입력
 - [x] Agent Registry TOOL_SPEC 등록
-- [x] BTR 파이프라인: create_btr_session → save_runtime_snapshot → validate_sclass_gate
+- [x] BTR 파이프라인 도구: create_btr_session → save_runtime_snapshot → validate_sclass_gate (※ 루프 드라이버는 코드에 없음 — 아래 [확정] 섹션 참조)
 - [x] 앤커링 방지 가이드라인: `critical_issues` → 검증 의제 프레이밍 (buildAntiAnchoredContext)
 - [x] `init_btr_sheets`: BTRRuntime·BTRNotifications 시트 생성 + 헤더 + OAuth 진단
-- [x] VedAstro API: 행성별 AllPlanetData GET 루프 (POST 버그 확인된 우회유)
+- [x] VedAstro API: 행성별 AllPlanetData GET 루프 (POST 버그 확인된 우회)
 - [x] update_script_file, deploy_script_webapp (OAuth 스코프 제한 있음)
 
 ### Hub Chat (v3.6)
@@ -65,19 +65,63 @@
 - [x] **AsterionHtmlReg GAS 배포 완료**
   - Script ID: `1Bs43_qnj31xBizc6a7_LhyKPbI3n_O36GD-RHmuvdFawB34tpJwRZQ1D`
   - Web App URL: `https://script.google.com/macros/s/AKfycby_uXWtm4lgpxJTgvQr6En5MiGaBOkVtLZAniqxF5vE0sMR8sSUavex-hQK-KzGicWn/exec`
-  - 완전 독립 실행형 — 기존 SignReg GAS 자리보전없음
+  - 완전 독립 실행형 — 기존 SignReg GAS 미사용
 - [x] **API 4개 함수 검증 완료** (2026-06-24)
   - `createPrivateRow` → PvReg 임시 행 생성
   - `saveDraftData` → 단계별 중간 저장
   - `saveRegistration` → L-코드 발급 + Archive 행 추가
-  - `checkOrderStatus` → COMPLETED/IN_PROGRESS/PENDING 상태 농
+  - `checkOrderStatus` → COMPLETED/IN_PROGRESS/PENDING 상태 판단
+- [x] **saveAddInfo 검증 완료**: 완료 고객(StructureCode) 추가정보를 Archive AddInfo(AH열)에 `[시각][종류] 내용` 누적 append
 - [x] **보안 구조 확인**: HTML폼 → GAS → PvReg → Archive (직접 접근 불가)
-- [x] `reg_config.js` GAS_URL 업데이트 완료
-- [x] PvReg 시트 헤더 25콼럼 정확히 설정된 상태 (코드 _PVREG_COL 매핑과 일치)
+- [x] `reg_config.js` GAS_URL 업데이트 완료 (…CNB6 → …KzGicWn, commit 345fe391)
+- [x] PvReg 시트 헤더 25컬럼 정확히 설정된 상태 (코드 _PVREG_COL 매핑과 일치)
+
+---
+
+## 🎯 [확정 · 2026-07-02] HTML 등록폼 ↔ BTR 실시간 통합 설계
+
+> 이번 채팅 세션에서 확정. **기존 구글폼(운영자가 등록 이후 수동으로 BTR) → HTML폼(등록과 동시에 실제 3자 BTR 진행)** 으로 전환하는 것이 HTML폼의 존재 이유. "경량 접수 루브릭" 개념은 폐기 — 실제 3자 루브릭이 돈다. (관련 명세: `Html폼_구현_명세서`, `ASTERION_3자루브릭_v3_0.md`)
+
+### 접수 흐름 (Signature/Private 공통)
+1. **STEP 4(현재상태) 완료 직후** 실제 3자 BTR을 **비동기**로 착수. BTR 입력 = {생년월일·생시·출생지·사건목록}. 현재상태(삶의 방향)는 채점 항목이 아니라 분석 컨텍스트로 함께 투입.
+2. BTR은 수 분~10분(Heartbeat 임계 10분) 소요 → **단일 블로킹 HTTP 호출 불가**. 진행상태를 BTRRuntime 시트에 기록하고 프런트가 폴링.
+3. 꼬리 단계(현재상태 → 시계/손목 → 수령 → 동의 1개씩 → 필요 시 안내영상/추가화면)로 연산 시간 확보. 목표 = 인세션 S-Class 도달. 미완 시 standby 영상("정보가 충분한지 검토 중"), 길거나 Held면 "접수완료 + 결과 연락".
+4. 추가질문은 꼬리 단계 사이에 동적 삽입 → **동적 스텝 큐** 필요 (현재 고정 STEP 1~8 switch 교체).
+5. **InProgress_BTR 임시 Archive 행 없음.** Archive 행은 BTR 종료(Confirmed/Held) 시에만 생성. StructureCode 채번도 Confirmed 시점(서버측). `saveRegistration`을 [제출: 폼데이터 마감] / [Confirmed: 서버측 채번+Archive 생성]으로 분리.
+6. 완료 화면에서 코드 노출 제거(`renderComplete`). 코드는 북클릿/연락으로 전달.
+
+### 3자 루브릭 라운드/리셋 개정 (v3.0 → 갱신)
+- **carry-forward 유지**: `buildAntiAnchoredContext`가 이전 라운드 요약+critical_issues+suggestions를 "미검증 의제"로 다음 라운드에 주입(앤커링 방지 래퍼 유지). 구버전 Isolated Execution(매 라운드 초기화)은 v3.0 §17에서 이미 폐기됨.
+- **최대 5→3라운드**: 종료 조건 = "수렴 OR 정체(직전 라운드 대비 점수 개선 없음·이견 안 줄어듦), 상한 3". 진전 없는 반복 방지.
+- **초기화(full_reset)는 새 변곡점(사건) 추가 시에만**: 기존 사건 상세화(추가질문 응답)는 carry-forward, 새 사건 추가면 Round 1 재시작. (v3.0의 "답변 시 무조건 재시작"보다 정밀 — 판단 기준은 "사건 세트가 바뀌었나")
+
+### ⚠️ 발견된 코드 이슈 (미수정 — 통합 착수 시 처리)
+- **[MCP index.js] `call_gpt`가 `previous_round_context` 미지원**: 스키마에 파라미터 없음 + 실행부에서 antiAnchoredCtx 미적용. Claude·Gemini만 carry-forward, GPT는 매 라운드 독립 분석. "모든 AI 동등" 원칙 위반 → 한 곳 수정.
+- **[MCP index.js] 이견 임계 불일치**: `btr_conflict_axis_finder`는 `>15`, v3.0 §8은 `≥5`. 라운드 개정 시 함께 확정.
+- **[Hub index.js] 등록폼용 라우트 부재**: `/api/reg/rubric` · `/api/naver/verify-order` · `/api/reg/addinfo` 미구현. Signature/Evolution 진입·루브릭 경로 막힘.
+- **[RegistrationForm reg_rubric.js] Private 게이지 = 로컬 시뮬레이션(`_localScore`)**: 실제 BTR 미호출(Grade-S는 연출값). BTR 통합으로 대체 예정.
+
+### HTML폼 UI 개선 (Private 실사용 피드백)
+- 생년월일: 네이티브 `<input type=date>` → 연도 선택 난해 → 커스텀 연/월/일 드롭다운(저장 YYYY-MM-DD 유지).
+- 출생시각: 네이티브 `<input type=time>` → 오전/오후 색상 피드백 불가 → 커스텀 오전/오후 토글+시/분(저장 HH:MM 유지).
+- 키보드: `_initKeyboardHandler`의 position:fixed 재배치가 안드로이드에서 버튼을 상단으로 튕김 → 재배치 제거 + 뷰포트 메타 `interactive-widget=resizes-content`, 버튼 흐름 유지.
+- 게이지: 용어 "Grade"→"S-Class". 금빛 애니메이션은 현재 1px 헤어라인 → 두께 있는 형태로 리디자인 필요. 단 BTR 통합 시 게이지는 실제 상태 반영으로 성격 변경.
+
+### 핵심 사실
+라운드/리셋 로직은 코드에 하드코딩되어 있지 않음 — index.js에 5라운드 루프 드라이버 부재(툴만 존재, 루프는 오케스트레이터-프롬프트가 구동). BTR 3자 파이프라인 실전 1회 미실행. → 5→3·리셋 규칙 변경은 코드 리팩터가 아니라 **오케스트레이터 스펙/프롬프트 + `ASTERION_3자루브릭_v3_0.md` 갱신** 사안. 이 개정으로 인한 실제 코드 변경은 GPT 컨텍스트 누락 한 곳뿐.
 
 ---
 
 ## 🚧 진행 중 / 다음 작업
+
+### HTML Registration Form — BTR 실시간 통합 (신규 · ↑ [확정] 섹션 참조)
+- [ ] Hub `/api/reg/rubric` 구현 — 3자 루브릭 착수 트리거 + BTRRuntime 상태 기록 (비동기)
+- [ ] MCP `call_gpt`에 `previous_round_context` 추가 (3자 carry-forward 대칭 완성)
+- [ ] 오케스트레이터 스펙/프롬프트: 라운드 상한 3 + "수렴 OR 정체" 종료 + "새 사건 추가 시에만 full_reset"
+- [ ] 프런트 동적 스텝 큐 전환 (고정 STEP 1~8 switch → 큐, 추가질문 동적 삽입 + BTRRuntime 폴링)
+- [ ] `saveRegistration` 분리 (제출=폼마감 / Confirmed=서버측 채번+Archive) + `renderComplete` 코드노출 제거
+- [ ] STEP 2 커스텀 입력 (연/월/일 드롭다운 + 오전/오후 토글) · 키보드 재배치 제거
+- [ ] `ASTERION_3자루브릭_v3_0.md` 갱신 (5→3 · 정체 종료 · 새 사건 리셋)
 
 ### HTML Registration Form — 잔여 작업
 - [ ] **GitHub Pages 활성화** (1회만 하면 완료)
@@ -93,7 +137,7 @@
 
 ### MCP 서버 — 잔여 작업
 - [ ] **Gemini 400 오류**: `sheets_write`, `append_sheet_row` 파라미터의 `array` 타입에 `items` 필드 누락
-- [ ] **Agent Registry 재등록**: v5.18 기준 89개 도구 재등록 필요
+- [ ] **Agent Registry 재등록**: 현재 배포(v5.22 · 92개 도구) 기준 재등록 필요
 
 ### Archive GAS Web App — 미완성 페이지
 - [ ] `booklet.html` — 고객 북클릿 생성/조회
@@ -101,10 +145,10 @@
 - 완성된 페이지: index, worksdesk, selectstone, inventory, invenmanage, stoneinfo, newlisting, design, analysismemo, productimage, structureindex
 
 ### 중장기
-- [ ] Signature Registration HTML폼 구현 (Private Registration 완료 후)
+- [ ] Signature Registration HTML폼 구현 (Private Registration 완료 후 · 위 [확정] BTR 통합 흐름 적용)
 - [ ] Evolution Registration HTML폼 구현
 - [ ] BTR 3자 루브릭 실전 파이프라인 1회 완전 실행
-- [ ] Archive GAS 콼럼 추가: BTRIteration, HeartbeatTime, HeartbeatStep, SearchRangeType, SearchRangeNote, GptScores, WaitInfo_DateRange, WaitInfo_TimeRange, DEGRADED
+- [ ] Archive GAS 컬럼 추가: BTRIteration, HeartbeatTime, HeartbeatStep, SearchRangeType, SearchRangeNote, GptScores, WaitInfo_DateRange, WaitInfo_TimeRange, DEGRADED
 - [ ] Supertonic TTS Lexicon Skip 문제 검증
 
 ---
@@ -126,17 +170,17 @@ ASTERION MCP:agent_registry_register 호출
 
 ---
 
-## 🤖 MCP 도구 계층 (v5.18, 89개)
+## 🤖 MCP 도구 계층 (v5.22, 92개)
 
-| 계층 | 수 | 분류 |
-|------|----|------|
-| L0 | 21 | VedAstro (베딕 점성술 연산) |
-| L1 | 22 | BTR (생시 보정 파이프라인 + 알림) + 영상 자동화 |
-| L2 | 7 | GCloud (Cloud Run, Agent Registry) |
-| L3 | 13 | SystemOps (GitHub, Sheets CRUD, HTTP) |
-| L4 | 18 | Workspace (Drive, Docs, GAS) |
-| L5 | 3 | AI (call_gemini, call_claude, call_gpt) |
-| L6 | 5 | Report/Ops (BTR 보고서, 감사로그) |
+| 계층 | 분류 |
+|------|------|
+| L0 | VedAstro (베딕 점성술 연산) |
+| L1 | BTR (생시 보정 파이프라인 + 알림) + 영상 자동화 |
+| L2 | GCloud (Cloud Run, Agent Registry) |
+| L3 | SystemOps (GitHub, Sheets CRUD, HTTP) |
+| L4 | Workspace (Drive, Docs, GAS) |
+| L5 | AI (call_gemini, call_claude, call_gpt) |
+| L6 | Report/Ops (BTR 보고서, 감사로그) |
 
 ### 환경변수 (Cloud Run)
 ```
@@ -154,10 +198,18 @@ MCP_SECRET_KEY
 ### VedAstro AllPlanetData(All) POST is broken
 POST /Calculate/AllPlanetData with PlanetName "All" returns the FIRST planet (Sun) data duplicated across all 9 planets. v5.13에서 행성별 GET 루프로 전환. POST 절대 되돌리기 금지.
 
+### GitHub 접근 규칙
+- MCP GitHub 도구는 API 사용 + `GITHUB_OWNER=victuar918`가 기본 → **repo 이름만** 전달 (예: `MCP_Server`, `RegistrationForm`).
+- 한글 포함 파일 수정 = `gh_push_files`(전체 교체) 우선. `github_patch_file`은 find 문자열이 ASCII 전용이고 유일할 때만.
+- 레포 검증은 `raw.githubusercontent.com` 캐시 가능 → `github_read_file`(API)로 확인.
+
+### 3자 루브릭 carry-forward 비대칭 (미수정)
+`call_claude`·`call_gemini`만 `previous_round_context`를 받아 앤커링 방지 컨텍스트를 붙임. `call_gpt`는 미지원 → GPT만 매 라운드 독립. 통합 착수 시 대칭화 필요.
+
 ### GitHub Pages (RegistrationForm)
 - 저장소 설정에서 수동 활성화 필요 (API로 활성화 불가 — 401)
 - `deploy_script_webapp`도 403 (OAuth scope `script.deployments` 미포함)
-- GAS 업데이트: `update_script_file` ✓ / 배포: 수동 1회
+- GAS 업데이트: `update_script_file` ✓ / 배포: 수동 1회 (배포 관리 → 새 버전 선택 → 배포)
 
 ### Gemini array 파라미터
 ```javascript
@@ -173,19 +225,19 @@ values: {type:'array', items:{type:'array', items:{type:'string'}}}
 3. `agent_registry_register` 재호출
 
 ### AsterionHtmlReg GAS 유의사항
-- 단일 `Code.gs` 파일에 모든 코드 (SIGNREG_CONFIG, _PVREG_COL, 4개 함수 + doPost)
+- 단일 `Code.gs` 파일에 모든 코드 (SIGNREG_CONFIG, _PVREG_COL, 함수 + doPost)
 - `update_script_file` 후 배포는 수동 1회 (deploy_script_webapp scope 부족)
-- 테스트 시 cleanupTestData 함수 임시 추가 → 직접 실행 → 제거 후 재배포 필요
+- 라이브 검증: `http_request`로 `/exec`에 POST (body=JSON, Content-Type text/plain;charset=utf-8). 가짜 코드로 saveAddInfo 호출 시 NOT_FOUND=정상.
 
 ### Cloud Run 배포
-- GitHub push → 배포 완료까지 약 2~3분
+- GitHub push → 배포 완료까지 약 2~3분 (문서/README 단독 push도 트리거됨 — 코드 동일이면 무해)
 - 배포 후 `get_system_status`로 버전 확인
 - `github_write_file` 후 반드시 버전 확인 후 다음 작업 진행
 
 ### BTR 알림 흐름
 ```
 MCP btr_write_notification → BTRNotifications 시트 (GCP ADC)
-    → Hub SSE 5초 폴링 → 바지 점등
+    → Hub SSE 5초 폴링 → 배지 점등
     → 관리자 응답 → Gemini 채팅 전달
     → updateNotifStatus('responded') → 카드 제거
 ```
