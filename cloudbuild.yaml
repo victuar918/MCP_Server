@@ -19,6 +19,10 @@ steps:
       - '--region'
       - 'asia-northeast3'
       - '--allow-unauthenticated'
+      - '--timeout'
+      - '3600'
+      - '--max-instances'
+      - '1'
 
 options:
   logging: CLOUD_LOGGING_ONLY
