@@ -1,5 +1,5 @@
 /**
- * dasha_overlay.js — v1 (2026-07)
+ * dasha_overlay.js — v1.1 (2026-07)
  * 목적: VedAstro DasaAtRange 의존 제거. index.js는 한 바이트도 수정하지 않는다.
  * 방식: globalThis.fetch 를 감싸 '/Calculate/DasaAtRange' POST 만 가로채고,
  *       출생 달의 LAHIRI 항성 경도(AllPlanetData — get_planet_positions 와 동일 경로)로
@@ -9,6 +9,7 @@
  * 롤백: package.json 의 start 를 "node index.js" 로 되돌리면 오버레이 없이 원상복구.
  * 실패 정책: fail-loud — 내부 오류 시 Status:'Fail' + overlay_error 를 반환해
  *       조용히 구버전 동작으로 폴백하지 않는다(무음 오답 방지).
+ * v1.1: 나크샤트라 철자 변형 접기(Swathi/Swati, Poorva/Purva 등) — crosscheck 거짓 경고 제거.
  */
 
 const VEDASTRO_BASE = 'https://api.vedastro.org/api';
@@ -81,8 +82,10 @@ function extractMoonLongitude(payload) {
   if (constel === undefined) constel = deepFind(payload, 'PlanetConstellation', 6);
   constel = constel == null ? '' : String(constel);
   const nk = Math.floor(lon / NAK_DEG);
-  const az = s => s.replace(/[^A-Za-z]/g, '').toLowerCase();
-  const xok = !constel || az(constel).indexOf(az(VIM_NAKS[nk])) === 0;
+  // 철자 변형 접기(Swathi/Swati, Poorva/Purva, -shtha/-shta 등) — 경고는 진짜 다른 나크샤트라일 때만
+  const az = s => s.toLowerCase().replace(/[^a-z]/g, '').replace(/th/g, 't').replace(/sh/g, 's').replace(/oo/g, 'u').replace(/aa/g, 'a');
+  const fc = az(constel), fn = az(VIM_NAKS[nk]);
+  const xok = !constel || fc.indexOf(fn) === 0 || fn.indexOf(fc) === 0;
   return { lon, constel, xok };
 }
 
