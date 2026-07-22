@@ -1,5 +1,5 @@
 /**
- * dasha_overlay.js — v1.1 (2026-07)
+ * dasha_overlay.js — v1.2 (2026-07)
  * 목적: VedAstro DasaAtRange 의존 제거. index.js는 한 바이트도 수정하지 않는다.
  * 방식: globalThis.fetch 를 감싸 '/Calculate/DasaAtRange' POST 만 가로채고,
  *       출생 달의 LAHIRI 항성 경도(AllPlanetData — get_planet_positions 와 동일 경로)로
@@ -10,6 +10,10 @@
  * 실패 정책: fail-loud — 내부 오류 시 Status:'Fail' + overlay_error 를 반환해
  *       조용히 구버전 동작으로 폴백하지 않는다(무음 오답 방지).
  * v1.1: 나크샤트라 철자 변형 접기(Swathi/Swati, Poorva/Purva 등) — crosscheck 거짓 경고 제거.
+ * v1.2: VedAstro +00:00 falsy 버그 교정 — VedAstro는 0이 아닌 오프셋은 정확히 반영하지만
+ *       +00:00/-00:00 은 무시하고 좌표 기반 현지시간으로 폴백한다(4점 실측: 187.4978/192.4544/196.1883/197.4358
+ *       전부 스위스 천체력 예측과 소수 3~4자리 일치). (a) 오버레이의 달 fetch 는 항상 등가 +01:00 벽시계로 전송,
+ *       (b) 그 외 모든 VedAstro GET 의 ±00:00 구간을 등가 +01:00 순간으로 자동 재작성 — natal 파이프라인까지 교정.
  */
 
 const VEDASTRO_BASE = 'https://api.vedastro.org/api';
@@ -93,8 +97,11 @@ function extractMoonLongitude(payload) {
 async function fetchMoonLongitude(origFetch, loc, bt) {
   const la = loc && loc.Latitude, lo = loc && loc.Longitude;
   if (!isFinite(la) || !isFinite(lo)) throw new Error('birth Location lat/lon invalid');
+  // VedAstro 는 +00:00 을 falsy 로 무시하고 좌표 현지시간으로 폴백한다(실측 확인).
+  // 이미 정확히 파싱한 UT epoch(bt.ms)를 항상 0이 아닌 +01:00 등가 벽시계로 변환해 전송한다.
+  const d1 = new Date(bt.ms + 3600000); const p2 = n => String(n).padStart(2, '0');
   const url = `${VEDASTRO_BASE}/Calculate/AllPlanetData/PlanetName/Moon/Location/${la},${lo}` +
-              `/Time/${bt.t}/${bt.dd}/${bt.mm}/${bt.yyyy}/${bt.tz}/Ayanamsa/LAHIRI`;
+              `/Time/${p2(d1.getUTCHours())}:${p2(d1.getUTCMinutes())}/${p2(d1.getUTCDate())}/${p2(d1.getUTCMonth()+1)}/${d1.getUTCFullYear()}/+01:00/Ayanamsa/LAHIRI`;
   const h = VEDASTRO_KEY ? { Authorization: `Bearer ${VEDASTRO_KEY}` } : {};
   const r = await origFetch(url, { headers: h, signal: AbortSignal.timeout(25000) });
   if (!r.ok) throw new Error(`Moon fetch HTTP ${r.status}`);
@@ -201,9 +208,23 @@ async function handleDasaAtRange(origFetch, init) {
 
 // ── fetch 인터셉트 설치 (DasaAtRange 외 전 트래픽은 원본 그대로 통과)
 const _origFetch = globalThis.fetch.bind(globalThis);
+let _tz0Logged = false;
+const VED_TZ0_RE = /\/Time\/(\d{2}):(\d{2})\/(\d{2})\/(\d{2})\/(\d{4})\/[+-]00:00\//;
+function rewriteVedTz0(u) {
+  const m = u.match(VED_TZ0_RE);
+  if (!m) return u;
+  const ms = Date.UTC(+m[5], +m[4] - 1, +m[3], +m[1], +m[2]) + 3600000;
+  const d = new Date(ms); const p = n => String(n).padStart(2, '0');
+  const seg = `/Time/${p(d.getUTCHours())}:${p(d.getUTCMinutes())}/${p(d.getUTCDate())}/${p(d.getUTCMonth()+1)}/${d.getUTCFullYear()}/+01:00/`;
+  if (!_tz0Logged) { console.log('[dasha_overlay] VedAstro ±00:00 falsy 폴백 감지 경로 → 등가 +01:00 으로 재작성'); _tz0Logged = true; }
+  return u.replace(VED_TZ0_RE, seg);
+}
 globalThis.fetch = async function (input, init = {}) {
   const u = typeof input === 'string' ? input : (input && input.url) || '';
-  if (!u.includes('/Calculate/DasaAtRange')) return _origFetch(input, init);
+  if (!u.includes('/Calculate/DasaAtRange')) {
+    if (u.includes('api.vedastro.org')) { const ru = rewriteVedTz0(u); if (ru !== u) return _origFetch(ru, init); }
+    return _origFetch(input, init);
+  }
   try {
     const out = await handleDasaAtRange(_origFetch, init);
     return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
