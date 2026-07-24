@@ -18,6 +18,7 @@ npm i -g pm2 --silent
 mkdir -p "$HOME/srv" && cd "$HOME/srv"
 [ -d MCP_Server ] || git clone https://github.com/victuar918/MCP_Server.git
 cd MCP_Server
+git config core.fileMode false
 git pull -q origin main || true
 npm install --omit=dev --no-audit --no-fund
 [ -f .env ] || cp phone/env.mcp.template .env
