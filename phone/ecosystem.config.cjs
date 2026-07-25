@@ -17,7 +17,7 @@ module.exports = {
       name: 'cloudflared',
       script: P + '/bin/bash',
       interpreter: 'none',
-      args: ['-lc', 'exec cloudflared tunnel run --token "$(cat $HOME/.cloudflared_token)"'],
+      args: ['-lc', 'exec cloudflared tunnel --protocol http2 --edge-ip-version 4 --edge 198.41.200.53:7844 --edge 198.41.200.13:7844 --edge 198.41.200.23:7844 --ha-connections 3 run --token "$(cat $HOME/.cloudflared_token)" 2>&1'],
       max_restarts: 200,
       restart_delay: 5000
     },
