@@ -317,6 +317,8 @@ POST /Calculate/AllPlanetData with PlanetName "All" returns the FIRST planet (Su
 ### 3자 루브릭 carry-forward 비대칭 (미수정)
 `call_claude`·`call_gemini`만 `previous_round_context`를 받아 앤커링 방지 컨텍스트를 붙임. `call_gpt`는 미지원 → GPT만 매 라운드 독립. 통합 착수 시 대칭화 필요.
 
+> **모델 매핑(2026-07)**: `call_gemini`=**Nemotron** · `call_claude`=**claude-sonnet-4-6** · `call_gpt`=**deepseek-v4-pro**. 슬롯명은 그대로고 모델만 교체되었으므로, 위 문단의 "GPT"는 **DeepSeek 슬롯**을 뜻함. 비대칭 이슈 자체는 여전히 미수정.
+
 ### GitHub Pages (RegistrationForm)
 - 저장소 설정에서 수동 활성화 필요 (API로 활성화 불가 — 401)
 - `deploy_script_webapp`도 403 (OAuth scope `script.deployments` 미포함)
