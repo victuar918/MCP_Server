@@ -102,6 +102,13 @@
 ### ⚠️ 발견된 코드 이슈 (미수정 — 통합 착수 시 처리)
 - **[MCP index.js] `call_gpt`가 `previous_round_context` 미지원**: 스키마에 파라미터 없음 + 실행부에서 antiAnchoredCtx 미적용. Claude·Gemini만 carry-forward, GPT는 매 라운드 독립 분석. "모든 AI 동등" 원칙 위반 → 한 곳 수정.
 - **[MCP index.js] 이견 임계 불일치**: `btr_conflict_axis_finder`는 `>15`, v3.0 §8은 `≥5`. 라운드 개정 시 함께 확정.
+- **[3자 루브릭 모델 구성 변경 · 2026-07]** 슬롯명(`call_gemini`/`call_claude`/`call_gpt`)은 그대로 두고 **실제 모델만 교체**됨:
+  - `call_gemini` → **Nemotron** (`nvidia/nemotron-3-ultra-550b-a55b`, NVIDIA NIM · thinking ON)
+  - `call_claude` → **claude-sonnet-4-6** (Anthropic)
+  - `call_gpt` → **deepseek-v4-pro** (DeepSeek 자체 API · `thinking:{type:'enabled'}` + `reasoning_effort:'high'` + `stream:false`)
+  - ⚠️ 문서 곳곳의 "Gemini"·"GPT" 표기는 **슬롯 기준**이지 실제 모델이 아니다. Google Gemini·OpenAI GPT는 더 이상 사용하지 않음
+  - ✅ 폰 서버 3자 실호출 검증 완료 (2026-07-25): `call_gemini`/`call_claude`/`call_gpt` 전부 정상 응답
+  - ☐ `ASTERION_3자루브릭_v3_0.md`의 모델명 표기도 동일하게 갱신 필요
 - **[Hub index.js] 등록폼용 라우트 부재**: `/api/reg/rubric` · `/api/naver/verify-order` · `/api/reg/addinfo` 미구현. Signature/Evolution 진입·루브릭 경로 막힘.
 - **[RegistrationForm reg_rubric.js] Private 게이지 = 로컬 시뮬레이션(`_localScore`)**: 실제 BTR 미호출(Grade-S는 연출값). BTR 통합으로 대체 예정.
 
@@ -140,7 +147,7 @@
 - [ ] **이어하기 테스트**: 중간에 닫았다 재접속시 IN_PROGRESS 반환 확인
 
 ### MCP 서버 — 잔여 작업
-- [ ] **Gemini 400 오류**: `sheets_write`, `append_sheet_row` 파라미터의 `array` 타입에 `items` 필드 누락
+- [ ] (Hub는 Gemini 미사용 — Agent Registry 등록 시에만 해당) **Gemini 400 오류**: `sheets_write`, `append_sheet_row` 파라미터의 `array` 타입에 `items` 필드 누락
 - [ ] **Agent Registry 재등록**: 현재 배포(v5.22 · 92개 도구) 기준 재등록 필요
 
 ### Archive GAS Web App — 미완성 페이지
@@ -210,6 +217,7 @@ curl -s https://mcp.asterion-origin.uk/ | head -c 200
 
 ```
 Hub Chat → Gemini 모델 선택 →
+(Hub 모델 버튼: 구 "Gemini" → 현재 "NEMO")
 "agent_registry_register 도구를 실행해서 MCP 서버를 재등록해줘"
 ```
 
@@ -314,7 +322,7 @@ POST /Calculate/AllPlanetData with PlanetName "All" returns the FIRST planet (Su
 - `deploy_script_webapp`도 403 (OAuth scope `script.deployments` 미포함)
 - GAS 업데이트: `update_script_file` ✓ / 배포: 수동 1회 (배포 관리 → 새 버전 선택 → 배포)
 
-### Gemini array 파라미터
+### [구 Gemini 연동 잔재 · 스키마 참고용] Gemini array 파라미터
 ```javascript
 // ❌ Gemini 400 오류
 values: {type:'array'}
@@ -339,6 +347,7 @@ values: {type:'array', items:{type:'array', items:{type:'string'}}}
 
 ### BTR 알림 흐름
 ```
+# 주의: 아래 "Gemini 채팅 전달"은 현재 Hub의 "NEMO"(Nemotron) 탭을 뜻함
 MCP btr_write_notification → BTRNotifications 시트 (GCP ADC)
     → Hub SSE 5초 폴링 → 배지 점등
     → 관리자 응답 → Gemini 채팅 전달
