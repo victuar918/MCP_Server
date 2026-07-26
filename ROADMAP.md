@@ -1,6 +1,6 @@
 # ASTERION 시스템 로드맵 & 유지관리 가이드
 
-> **최종 업데이트**: 2026-07-02
+> **최종 업데이트**: 2026-07-25
 > **현재 버전**: MCP v5.22 · Hub v3.6
 
 ---
@@ -10,7 +10,8 @@
 ### 서비스 URL
 | 서비스 | URL |
 |--------|-----|
-| MCP 서버 | https://mcp-server-611151539232.asia-northeast3.run.app |
+| MCP 서버 | https://mcp.asterion-origin.uk/mcp — **폰 서버 (현재)** |
+| MCP 서버 (GCP · 롤백용) | https://mcp-server-611151539232.asia-northeast3.run.app |
 | Hub Chat | https://ai-chat-hub-611151539232.asia-northeast3.run.app |
 | Agent Registry ID | agentregistry-00000000-0000-0000-d9ab-851925d12ac3 |
 
@@ -57,7 +58,10 @@
 - [x] update_script_file, deploy_script_webapp (OAuth 스코프 제한 있음)
 
 ### Hub Chat (v3.6)
-- [x] Claude / Gemini 멀티모델 (Native MCP 연결)
+- [x] **Claude / NEMO(Nemotron) / DeepSeek-v4-pro** 3모델 (Native MCP 연결) — 2026-07 전환 완료
+- [x] 에이전트 지속성: MAX_TOOL_DEPTH 8→15 + 시스템 프롬프트 [작업 지속성] 지시문 (buildStringSystem·buildClaudeSystem 양쪽)
+- [x] Cloud Run 설정: --timeout 900 + --memory 2Gi (도구 92개+thinking 응답 파싱 시 512MB OOM → HTTP 503 해결)
+- [x] (구) Claude / Gemini 멀티모델 (Native MCP 연결)
 - [x] Supertonic 3 TTS v4.2.15 (ONNX, 문장 단위 청크 파이프라인)
 - [x] BTR 알림 시스템: SSE 5초 폴링 → 알림 카드 → 응답 → Gemini 전달
 
@@ -153,6 +157,53 @@
 
 ---
 
+## 📚 폰 서버 전환 (PhoneServer) — 2026-07-25
+
+> MCP 서버 실행 위치를 **GCP Cloud Run → 갤럭시 S22 Ultra 상주 서버**로 이전. **콜드스타트 제거 + GCP 비용 0**. GCP 경로(Cloud Run·트리거·cloudbuild.yaml)는 **롤백용으로 그대로 보존**.
+
+### 구조
+```
+claude.ai 커넥터 / Hub
+   ↓  https://mcp.asterion-origin.uk/mcp
+Cloudflare Tunnel (icn01 서울 edge, http2)
+   ↓
+공폰 Termux — pm2 3프로세스
+  mcp-server   phone/boot.js → index.js (PORT 8080)
+  cloudflared  터널
+  watcher      60초 GitHub 폴링 → git pull + pm2 restart
+```
+
+### phone/ 파일
+| 파일 | 역할 |
+|------|------|
+| `boot.js` | **metadata shim** — 폰엔 GCP metadata 서버가 없어 `getGCPToken()` 실패(영상 시트·GCP 도구 전멸) → 서비스계정 키로 JWT 발급해 동일 형식 반환. `.env` 로더 겸용. **index.js 무수정** = GCP 영향 0 |
+| `ecosystem.config.cjs` | pm2 3프로세스 정의 |
+| `watcher.sh` | 자동배포 루프 — Claude가 GitHub 패치 → **60초 내 폰 반영** (Cloud Build 대체) |
+| `setup.sh` | Termux 원라인 설치 (멱등, 재실행 안전) |
+| `env.mcp.template` | `.env` 템플릿 |
+
+### 설치 순서
+1. **F-Droid**에서 Termux + Termux:Boot 설치 (플레이스토어판 금지) → Termux:Boot 1회 실행(UI 없음, 설명문만 뜨면 정상) → 배터리 **제한 없음** + 배터리 보호 85%
+2. `curl -sL https://raw.githubusercontent.com/victuar918/MCP_Server/main/phone/setup.sh | bash`
+3. 키 3개: `~/srv/MCP_Server/.env` / `~/srv/sa-key.json` (GCP **서비스계정** 키 JSON — OAuth `client_secret.json` 아님) / `~/.cloudflared_token`
+4. `pm2 start ~/srv/MCP_Server/phone/ecosystem.config.cjs && pm2 save`
+5. Cloudflare 대시보드 → **Networking > Tunnels** → 터널 → **경로(Routes)** 탭 → 경로 추가 → **게시된 애플리케이션** (`mcp` / `asterion-origin.uk` / `http://localhost:8080`)
+   - ⚠️ 커넥터가 붙은 뒤에야 경로 화면이 열림 → **폰 기동을 먼저**
+
+### 검증
+```
+pm2 status                                    # 3개 online
+tail -n 20 ~/.pm2/logs/cloudflared-out.log    # Registered tunnel connection ... icn01
+curl -s https://mcp.asterion-origin.uk/ | head -c 200
+```
+- claude.ai 커넥터 URL: `https://mcp.asterion-origin.uk/mcp` (인증란 **비움**)
+- `get_system_status` → `gcp_adc: ADC 정상`이면 boot.js shim 정상 동작
+
+### 롤백 (GCP 복귀)
+커넥터/Hub의 MCP URL을 `https://mcp-server-611151539232.asia-northeast3.run.app` 으로 되돌리면 **즉시 복귀**.
+
+---
+
 ## 📚 [CRITICAL] Agent Registry 재등록 방법
 
 **배경**: GCP Console UI에 버그가 있어 UI로는 등록 불가. REST API 직접 호출만 가능.
@@ -179,12 +230,12 @@ ASTERION MCP:agent_registry_register 호출
 | L2 | GCloud (Cloud Run, Agent Registry) |
 | L3 | SystemOps (GitHub, Sheets CRUD, HTTP) |
 | L4 | Workspace (Drive, Docs, GAS) |
-| L5 | AI (call_gemini, call_claude, call_gpt) |
+| L5 | AI — call_gemini=**Nemotron**(NVIDIA), call_claude=**claude-sonnet-4-6**, call_gpt=**deepseek-v4-pro** |
 | L6 | Report/Ops (BTR 보고서, 감사로그) |
 
 ### 환경변수 (Cloud Run)
 ```
-ANTHROPIC_API_KEY    GEMINI_API_KEY    OPENAI_API_KEY
+ANTHROPIC_API_KEY    NVIDIA_API_KEY    DEEPSEEK_API_KEY
 GITHUB_PAT           GITHUB_OWNER=victuar918
 GCP_PROJECT=asterion-server   GCP_REGION=asia-northeast3
 GOOGLE_CLIENT_ID     GOOGLE_CLIENT_SECRET    GOOGLE_REFRESH_TOKEN
@@ -194,6 +245,58 @@ MCP_SECRET_KEY
 ---
 
 ## ⚠️ 알아두면 유용한 함정들
+
+### [폰 서버] Cloudflare 터널 7844 차단 — edge IP 고정으로 우회
+상위망이 **`198.41.192.x` 대역의 7844 포트를 차단**. cloudflared는 7844가 필수라 기본 설정으로는 절대 연결되지 않음 (`i/o timeout` 무한 반복).
+- **진단**: `timeout 8 bash -c 'cat < /dev/null > /dev/tcp/<IP>/7844'` → `198.41.200.x` **전부 열림**, `192.x`·IPv6(`2606:4700::`) 막힘, `portquiz.net:7844` 열림 → **포트가 아니라 목적지 기반 차단**
+- **해결**: `--protocol http2`(QUIC/UDP 회피) + `--edge-ip-version 4`(IPv6 회피) + `--edge 198.41.200.x:7844` 고정 + **`--ha-connections` = edge IP 개수**
+- ⚠️ IP 개수 < 연결 개수면 `already connected to this server` / `no free edge addresses left`로 실패. **IP 3개 → ha-connections 3**
+- ⚠️ `--region us`는 역효과(막힌 `192.x`·IPv6로 붙음). 사용 금지
+- 성공 로그: `Registered tunnel connection ... location=icn01 protocol=http2`
+- ⚠️ 포트포워딩·DMZ·DDNS·IP/Port 필터링은 **전부 인바운드 기능이라 무관**. 공유기 메뉴 삽질 금지
+
+### [폰 서버] .env의 보이지 않는 문자 (U+200B)
+모바일에서 콘솔의 API 키를 복사하면 **제로폭 공백(U+200B)** 이 섞여 들어옴. 화면상 식별 불가.
+- **증상**: AI 호출이 **0.05초 만에 즉시 실패** — `Cannot convert argument to a ByteString because the character at index N has a value of 8203`. 타임아웃처럼 보이지만 정반대(즉시 실패)
+- **해결**: `node -e 'const fs=require("fs");const p=process.env.HOME+"/srv/MCP_Server/.env";let s=fs.readFileSync(p,"utf8");s=s.split("\n").map(l=>l.replace(/[^\x20-\x7E]/g,"").replace(/\s+$/,"")).join("\n");fs.writeFileSync(p,s);'` → `pm2 restart mcp-server --update-env`
+- 키를 새로 넣거나 수정할 때마다 재발 가능 → **AI 호출이 즉시 실패하면 먼저 이것부터 의심**
+
+### [폰 서버] pm2 설정 파일은 반드시 `.cjs`
+`package.json`에 `"type":"module"`이 있어 `ecosystem.config.js`는 ESM으로 해석됨 → `ReferenceError: module is not defined in ES module scope`. **`.cjs` 확장자 필수**
+
+### [폰 서버] git core.fileMode — 자동배포 정지 원인
+`chmod +x`가 tracked 파일의 모드 비트를 바꿔 git이 로컬 수정으로 인식 → watcher의 `git pull`이 **영구 실패**(자동배포 정지)
+- 예방: `git config core.fileMode false` (setup.sh에 포함)
+- 복구: `git checkout -- <파일>` 후 `git pull`
+
+### [폰 서버] Termux 초기 curl 깨짐
+미러 미선택 상태로 pkg 설치 시 openssl 라이브러리 불일치 → `CANNOT LINK EXECUTABLE "curl" ... SSL_set_quic_tls_transport_params`
+- 해결: `termux-change-repo`(Mirror group 선택) → **`apt update && apt full-upgrade -y`**
+- ⚠️ `pkg`는 내부적으로 curl을 쓰므로 이 상태에선 실패 → 반드시 `apt` 사용
+
+### [폰 서버] MCP_SECRET_KEY는 claude.ai 커넥터에서 사용 불가
+서버 인증은 `Authorization: Bearer <키>` / `x-mcp-token` **헤더** 방식인데, claude.ai 커넥터 설정에는 **OAuth 클라이언트 ID/시크릿 칸만** 있고 커스텀 헤더 입력란이 없음
+- `MCP_SECRET_KEY`를 채우면 **모든 커넥터가 401로 즉시 끊김** → **비워둘 것**
+- 보안이 필요하면 추측 불가능한 서브도메인(예: `mcp-a7f3k9x2.asterion-origin.uk`) 또는 Cloudflare WAF로 대체
+- 폰 전용 추가 환경변수: `GOOGLE_SA_KEY_JSON=/data/data/com.termux/files/home/srv/sa-key.json`
+
+### [교훈] MCP 안정화 패치 → 전면 롤백 (2026-07)
+Cloud Run 시절 도구 호출 간헐 실패에 다음을 적용했다가 **끊김이 오히려 악화**되어 전면 롤백:
+- 적용했던 것: SSE keepalive 25초 핑 / `process.on('unhandledRejection'|'uncaughtException')` 가드 / `/message` 죽은 세션 가드 / `--timeout 3600` / `--max-instances 1`
+- **원인**: 크래시 가드 + max-instances 1 조합이 **죽으면 새 인스턴스로 자가치유되던 경로를 제거** → 병든 인스턴스 1개가 계속 서빙. `--timeout 3600`은 죽은 SSE를 오래 붙잡아 감지를 늦춤
+- **교훈 1**: 잘 되던 시스템이 변경 직후 나빠지면 **새 대책을 더하지 말고 그 변경을 되돌린다**
+- **교훈 2**: 롤백은 트래픽만 옮기지 말고 **git까지** 되돌려야 다음 배포에서 재발하지 않음
+- **교훈 3**: `gcloud run deploy`는 플래그를 생략하면 **기존 설정이 유지**됨 → 되돌릴 땐 기본값을 **명시** (`--timeout 300`, `--max-instances default`)
+- 근본 해결은 폰 서버 이전(상주 프로세스 = 콜드스타트·인스턴스 미스 원천 소멸)으로 대체
+
+### NVIDIA는 자체 모델만 견고 — 외부 호스팅 모델 주의
+`integrate.api.nvidia.com`의 **Nemotron(자체 모델)**은 도구 92개 + 풀 페르소나 요청도 안정적. 반면 외부 모델 `z-ai/glm-5.2`는 무거운 요청에서 **502 Bad Gateway / Upstream request failed** 반복(게이트웨이가 모델 서버 응답 못 받음) → Hub 설정으로 해결 불가, **DeepSeek 자체 API 교체가 정답**
+- NVIDIA NIM 문서상 `stream` 기본값이 `true`인 모델 존재 → `response.json()` 파싱 구조면 **`stream:false` 명시** 필요
+
+### HTTP 503 계층 진단법 (Cloud Run + SSE)
+Hub `/api/chat`은 에러를 SSE(HTTP 200)로 흘리므로 **진짜 HTTP 503 = 컨테이너가 응답을 시작조차 못함**(hang/크래시/타임아웃). SSE가 한 번이라도 쓰였으면 이후 실패는 스트림 절단이지 503 아님
+- fetch 타임아웃이 안 터지는데 503 → **Cloud Run 요청 타임아웃이 더 짧음**
+- 메모리 상향 후 opaque 503이 graceful 에러로 바뀜 → **OOM이 원인이었음 확정**
 
 ### VedAstro AllPlanetData(All) POST is broken
 POST /Calculate/AllPlanetData with PlanetName "All" returns the FIRST planet (Sun) data duplicated across all 9 planets. v5.13에서 행성별 GET 루프로 전환. POST 절대 되돌리기 금지.
