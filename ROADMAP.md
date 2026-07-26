@@ -254,7 +254,17 @@ MCP_SECRET_KEY
 
 ## ⚠️ 알아두면 유용한 함정들
 
-### [폰 서버] Cloudflare 터널 7844 차단 — edge IP 고정으로 우회
+### [폰 서버] cloudflared 연결 실패 — 진범은 **WARP VPN** (2026-07-26 정정)
+
+⚠️ **이전 진단("상위망이 7844 차단")은 오진이었다.** 실제 원인은 폰에 설치돼 있던 **Cloudflare One(WARP) VPN**이었다. WARP는 Cloudflare 자체 IP 대역을 루프 방지를 위해 특수 처리하므로, `198.41.192.x`·IPv6·QUIC이 전부 막힌 것처럼 보인다.
+
+- **확인**: `curl -s https://www.cloudflare.com/cdn-cgi/trace | grep warp` → `warp=on`이면 범인
+- **해결**: Cloudflare One 앱 연결 해제(권장: 삭제). 터널은 Termux의 `cloudflared` 바이너리가 담당하므로 **이 앱은 전혀 필요 없다**
+- WARP 해제 후: `198.41.192.x` OPEN, `QUIC connection successful`, `Environment is healthy` → **`--edge` 고정 없이 기본 설정으로 연결**됨 (edge IP 하드코딩은 Cloudflare가 IP를 바꾸면 터널이 죽는 취약점 → 제거함)
+- **교훈**: 네트워크가 이상하면 **VPN/프록시부터 확인**한다. "특정 대역만 막힘"은 방화벽보다 **VPN 라우팅의 전형적 징후**다
+- ⚠️ 포트포워딩·DMZ·DDNS·IP/Port 필터링은 **전부 인바운드 기능이라 아웃바운드 문제와 무관**. 공유기 메뉴 삽질 금지
+
+#### (구 진단 · 오진 보존 — 증상 패턴 참고용) Cloudflare 터널 7844 차단 — edge IP 고정으로 우회
 상위망이 **`198.41.192.x` 대역의 7844 포트를 차단**. cloudflared는 7844가 필수라 기본 설정으로는 절대 연결되지 않음 (`i/o timeout` 무한 반복).
 - **진단**: `timeout 8 bash -c 'cat < /dev/null > /dev/tcp/<IP>/7844'` → `198.41.200.x` **전부 열림**, `192.x`·IPv6(`2606:4700::`) 막힘, `portquiz.net:7844` 열림 → **포트가 아니라 목적지 기반 차단**
 - **해결**: `--protocol http2`(QUIC/UDP 회피) + `--edge-ip-version 4`(IPv6 회피) + `--edge 198.41.200.x:7844` 고정 + **`--ha-connections` = edge IP 개수**
