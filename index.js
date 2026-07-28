@@ -1,5 +1,6 @@
 /**
- * ASTERION AI Evolution Engine v5.21
+ * ASTERION AI Evolution Engine v5.23
+ * v5.23: +phone_exec (Termux 쉘 실행 — 폰 서버 진단/배포/자기재시작)
  * v5.21: video_create_script & append_sheet_row Script(G) reject gate (close remaining Korean input paths); +video_write_safe (Doc-JSON write-by-reference, no LLM re-emit) +video_verify_script (server-side NFC compare sheet vs Doc)
  * v5.20: #3 video Script(G) integrity gate (sheetName AND colG dual-scope; atomic reject isolated-jamo/latin/emoji) + NFC in shared sanitizer (also fixes deescape backslash bug); #5 timezone format-guard replaces existence-guard; get_match_report dual person1_tz/person2_tz
  * v5.19: video_create_script+sheets_write — VS_/VIDEO_* 시트 한정 \uXXXX literal → 실제 문자 자동 변환 (한글 깨짐 방지, BTR 시트 무영향)
@@ -23,6 +24,8 @@
 
 import express from 'express';
 import cors from 'cors';
+import { exec, spawn } from 'child_process';
+import { existsSync } from 'fs';
 
 const app  = express();
 const PORT = process.env.PORT || 8080;
@@ -297,6 +300,7 @@ const ALL_TOOLS = [
   {name:'sheets_read',description:'Google Sheets 읽기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'}},required:['spreadsheetId','range']}},
   {name:'sheets_write',description:'Google Sheets 쓰기.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'array',items:{type:'string'}}}},required:['spreadsheetId','range','values']}},
   {name:'http_request',description:'임의 HTTP 요청.',inputSchema:{type:'object',properties:{url:{type:'string'},method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE']},body:{type:'object'},headers:{type:'object'}},required:['url']}},
+  {name:'phone_exec',description:'★ 폰 서버(Termux) 쉘 명령 실행. cwd 기본 ~/srv/MCP_Server, timeout_ms 기본 60000(최대 300000), detach:true는 백그라운드 실행 후 즉시 응답(자기 재시작용). 출력 8000자 절단.',inputSchema:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'},timeout_ms:{type:'number'},detach:{type:'boolean'}},required:['command']}},
   {name:'get_system_status',description:'ASTERION 전체 시스템 상태.',inputSchema:{type:'object',properties:{},required:[]}},
   {name:'append_sheet_row',description:'Google Sheets 행 추가.',inputSchema:{type:'object',properties:{spreadsheetId:{type:'string'},range:{type:'string'},values:{type:'array',items:{type:'string'}}},required:['spreadsheetId','range','values']}},
   {name:'read_google_doc',description:'Google Docs 텍스트 추출.',inputSchema:{type:'object',properties:{document_id:{type:'string'}},required:['document_id']}},
@@ -336,7 +340,7 @@ const ALL_TOOLS = [
 const L0=new Set(['geocode_location','get_timezone','get_planet_positions','get_house_positions','get_navamsa_chart','get_ascendant','get_planet_in_house','get_planet_in_sign','get_current_dasha','get_dasha_timeline','get_dasha_sandhi','get_birth_nakshatra','get_planet_yogas','get_transit_planets','get_full_chart_analysis','get_horoscope_predictions','get_match_report','get_numerology_prediction','get_ashtakvarga_data','astro_check_retrograde','astro_planetary_war_check']);
 const L1=new Set(['create_btr_session','save_runtime_snapshot','get_runtime_snapshot','purge_runtime_state','save_evolution_log','get_evolution_history','validate_sclass_gate','btr_init_candidate_slots','btr_consensus_analyzer','btr_conflict_axis_finder','btr_re_eval_pivots','btr_weight_adjuster','btr_prediction_tester','btr_write_notification','btr_finalize_confirmed','btr_finalize_held','init_btr_sheets','video_init_sheets','video_create_script','video_append_script','video_read_script','video_update_row_status','video_delete_script','video_write_safe','video_verify_script']);
 const L2=new Set(['gcloud_submit','cloudbuild_status','cloudrun_services','artifact_list','cloudrun_set_env','agent_registry_list','agent_registry_register']);
-const L3=new Set(['github_read_file','github_write_file','github_list_files','gh_push_files','github_patch_file','sheets_read','sheets_write','sheets_update_row','delete_sheet_row','insert_sheet_row','http_request','get_system_status','append_sheet_row']);
+const L3=new Set(['github_read_file','github_write_file','github_list_files','gh_push_files','github_patch_file','sheets_read','sheets_write','sheets_update_row','delete_sheet_row','insert_sheet_row','http_request','get_system_status','append_sheet_row','phone_exec']);
 const L4=new Set(['read_google_doc','create_google_doc','docs_patch','create_spreadsheet','export_doc_as_pdf','delete_drive_file','create_drive_folder','delete_drive_folder','list_drive_contents','list_script_projects','get_script_content','update_script_file','deploy_script_webapp','backup_script_project','delete_artifact_image','list_run_revisions','delete_run_revision','create_btr_report_doc']);
 const L5=new Set(['call_gemini','call_claude','call_gpt']);
 const L6=new Set(['report_generate_btr_code','report_generate_summary','report_add_gemstone_advice','ops_audit_log_exporter','ops_pattern_match_failure']);
@@ -610,6 +614,22 @@ async function execSystem(n,a){
   }
   if(n==='delete_sheet_row'){const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};const{spreadsheetId,sheet_name,row_index,key_column,key_value}=a;const si=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,{headers:{Authorization:`Bearer ${tok}`}},10000);if(!si.ok)return{error:`SS 조회 실패 ${si.status}`};const sh=(await si.json()).sheets?.find(s=>s.properties.title===sheet_name);if(!sh)return{error:`시트 없음: ${sheet_name}`};const sheetId=sh.properties.sheetId;let targetRow=row_index;if(!targetRow&&key_column&&key_value){const dr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheet_name)}`,{headers:{Authorization:`Bearer ${tok}`}},10000);if(!dr.ok)return{error:`읽기 실패 ${dr.status}`};const rows=((await dr.json()).values)||[],hdr=rows[0]||[],ki=hdr.indexOf(key_column);if(ki<0)return{error:`컬럼 없음: ${key_column}`};const ri=rows.findIndex((r,i)=>i>0&&String(r[ki]||'').trim()===String(key_value).trim());if(ri<0)return{error:`키 값 없음: ${key_value}`};targetRow=ri+1;}if(!targetRow)return{error:'row_index 또는 key_column+key_value 필요'};const delR=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:[{deleteDimension:{range:{sheetId,dimension:'ROWS',startIndex:targetRow-1,endIndex:targetRow}}}]})},15000);if(!delR.ok)return{error:`행 삭제 실패 ${delR.status}: ${(await delR.text()).slice(0,200)}`};return{success:true,deleted_row:targetRow,sheet_name};}
   if(n==='insert_sheet_row'){const tok=await getGoogleToken();if(!tok)return{error:'Google 인증 실패'};const{spreadsheetId,sheet_name,row_index,values}=a;const si=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,{headers:{Authorization:`Bearer ${tok}`}},10000);if(!si.ok)return{error:`SS 조회 실패 ${si.status}`};const sh=(await si.json()).sheets?.find(s=>s.properties.title===sheet_name);if(!sh)return{error:`시트 없음: ${sheet_name}`};const sheetId=sh.properties.sheetId;const insR=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,{method:'POST',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({requests:[{insertDimension:{range:{sheetId,dimension:'ROWS',startIndex:row_index-1,endIndex:row_index},inheritFromBefore:false}}]})},15000);if(!insR.ok)return{error:`행 삽입 실패 ${insR.status}: ${(await insR.text()).slice(0,200)}`};if(values?.length){const wr=await fetchWithTimeout(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheet_name+'!A'+row_index)}?valueInputOption=USER_ENTERED`,{method:'PUT',headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},body:JSON.stringify({values:[values]})},15000);if(!wr.ok)return{error:`값 입력 실패 ${wr.status}`};}return{success:true,inserted_row:row_index,sheet_name,values_written:values?.length||0};}
+  if(n==='phone_exec'){
+    const cmd=a.command;
+    if(!cmd||typeof cmd!=='string')return{error:'command 문자열 필요'};
+    const HOME=process.env.HOME||process.cwd();
+    let cwd=a.cwd?String(a.cwd):HOME+'/srv/MCP_Server';
+    if(cwd.startsWith('~'))cwd=HOME+cwd.slice(1);
+    if(!existsSync(cwd))return{error:'cwd 폴더가 없습니다: '+cwd};
+    const sh=process.env.SHELL||(process.env.PREFIX?process.env.PREFIX+'/bin/bash':'/bin/sh');
+    const MAX=8000,clip=s=>{s=String(s||'');return s.length>MAX?s.slice(0,MAX)+' ...[truncated '+(s.length-MAX)+' chars]':s;};
+    if(a.detach===true){
+      try{const ch=spawn(sh,['-c',cmd],{cwd,detached:true,stdio:'ignore'});ch.unref();return{detached:true,pid:ch.pid,shell:sh,cwd,command:cmd,note:'백그라운드 실행 — 출력 없음'};}
+      catch(e){return{error:'spawn 실패: '+e.message,shell:sh,cwd};}
+    }
+    let t=Number(a.timeout_ms);if(!Number.isFinite(t)||t<=0)t=60000;t=Math.min(Math.max(t,1000),300000);
+    return await new Promise(rs=>{exec(cmd,{cwd,shell:sh,timeout:t,maxBuffer:10485760,killSignal:'SIGKILL',encoding:'utf8'},(err,so,se)=>{const o={command:cmd,cwd,shell:sh,timeout_ms:t,exit_code:err?(typeof err.code==='number'?err.code:null):0,timed_out:!!(err&&err.killed),stdout:clip(so),stderr:clip(se)};if(err&&typeof err.code!=='number')o.error=err.message;rs(o);});});
+  }
   if(n==='get_system_status'){const[mcp]=await Promise.allSettled([fetchWithTimeout(`${MCP_URL}/`).then(r=>r.json())]);return{mcp_server:mcp.status==='fulfilled'?{ok:true,server:mcp.value?.server,tools:mcp.value?.totalTools}:{ok:false},github_pat:GITHUB_PAT?'✓':'✗',google_oauth:process.env.GOOGLE_REFRESH_TOKEN?'✓':'✗',gcp_adc:(await getGCPToken())?'✓ ADC 정상':'✗',timestamp:new Date().toISOString()};}
   return{error:`미구현: ${n}`};
 }
@@ -725,7 +745,7 @@ app.post('/',requireMcpAuth,async(req,res)=>{
   }catch(e){return res.status(500).json({jsonrpc:'2.0',id,error:{code:-32603,message:e.message}});}
 });
 app.get('/',(_req,res)=>res.json({
-  status:'running',server:'ASTERION AI Evolution Engine v5.22',
+  status:'running',server:'ASTERION AI Evolution Engine v5.23',
   transports:{mcp:'POST/GET/DELETE /mcp',sse:'GET /sse'},
   layers:{L0:`VedAstro(${L0.size})`,L1:`BTR+Video(${L1.size})`,L2:`GCloud(${L2.size})`,L3:`SystemOps(${L3.size})`,L4:`Workspace(${L4.size})`,L5:`AI(${L5.size})`,L6:`Report/Ops(${L6.size})`},
   totalTools:ALL_TOOLS.length,toolList:ALL_TOOLS.map(t=>t.name)
