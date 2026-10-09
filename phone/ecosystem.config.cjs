@@ -48,6 +48,16 @@ module.exports = {
       interpreter: 'bash',
       max_restarts: 50,
       restart_delay: 10000
+    },
+    {
+      // ASTERION 렌더 앱 감시 — render_status.txt가 10분 넘게 멈추면 앱 실행 (phone/render-watchdog.sh 참고)
+      // watcher는 mcp-server만 재시작하므로 스크립트 수정 후엔: pm2 restart render-watchdog
+      name: 'render-watchdog',
+      cwd: H + '/srv/MCP_Server',
+      script: 'phone/render-watchdog.sh',
+      interpreter: 'bash',
+      max_restarts: 50,
+      restart_delay: 10000
     }
   ]
 };
